@@ -41,15 +41,6 @@ namespace InstaSearch.UI
             _debounceTimer.Tick += DebounceTimer_Tick;
 
             Loaded += SearchDialog_Loaded;
-            Deactivated += SearchDialog_Deactivated;
-        }
-
-        private void SearchDialog_Deactivated(object sender, EventArgs e)
-        {
-            // Close when clicking outside the dialog
-            _selectedResult = null;
-            DialogResult = false;
-            Close();
         }
 
         private async void SearchDialog_Loaded(object sender, RoutedEventArgs e)
@@ -186,7 +177,7 @@ namespace InstaSearch.UI
             SearchTextBox.Focus();
         }
 
-        protected override void OnClosed(System.EventArgs e)
+        protected override void OnClosed(EventArgs e)
         {
             _debounceTimer.Stop();
             _searchCts?.Cancel();
