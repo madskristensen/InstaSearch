@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+  <Extern href="stdidcmd.h"/>
+  <Extern href="vsshlids.h"/>
+  <Include href="KnownImageIds.vsct"/>
+  <Include href="VSGlobals.vsct"/>
+
+  <Commands package="InstaSearch">
+    <!--This section defines the elements the user can interact with, like a menu command or a button
+        or combo box in a toolbar. -->
+    <Buttons>
+      <Button guid="InstaSearch" id="SearchCommand" priority="0x0300" type="Button">
+        <Parent guid="VSMainMenu" id="Edit.GoToGroup" />
+        <Icon guid="ImageCatalogGuid" id="Search" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <Strings>
+          <ButtonText>File Search</ButtonText>
+          <LocCanonicalName>.InstaSearch.FileSearch</LocCanonicalName>
+        </Strings>
+      </Button>
+    </Buttons>
+  </Commands>
+
+  <KeyBindings>
+    <KeyBinding guid="InstaSearch" id="SearchCommand" mod1="Alt" key1="VK_SPACE" editor="guidVSStd97"/>
+  </KeyBindings>
+
+  <Symbols>
+    <GuidSymbol name="InstaSearch" value="{57177298-f907-4522-a5c9-3a2d120fed94}">
+      <IDSymbol name="SearchCommand" value="0x0100" />
+    </GuidSymbol>
+  </Symbols>
+</CommandTable>
