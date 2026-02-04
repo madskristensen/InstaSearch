@@ -3,7 +3,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.Imaging.Interop;
-using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 
 namespace InstaSearch.Services
@@ -11,16 +10,8 @@ namespace InstaSearch.Services
     /// <summary>
     /// Fast file search service with history-based ranking.
     /// </summary>
-    public class SearchService
+    public class SearchService(FileIndexer indexer, SearchHistoryService history)
     {
-        private readonly FileIndexer _indexer;
-        private readonly SearchHistoryService _history;
-
-        public SearchService(FileIndexer indexer, SearchHistoryService history)
-        {
-            _indexer = indexer;
-            _history = history;
-        }
 
         /// <summary>
         /// Searches for files matching the query with results ranked by history.
@@ -40,46 +31,53 @@ namespace InstaSearch.Services
         {
             if (string.IsNullOrEmpty(rootPath))
             {
-                return Array.Empty<SearchResult>();
+                return [];
             }
 
             // Get indexed files
-            IReadOnlyList<FileEntry> files = await _indexer.IndexAsync(rootPath, cancellationToken);
+            IReadOnlyList<FileEntry> files = await indexer.IndexAsync(rootPath, cancellationToken);
 
-            // Switch to UI thread to get monikers
-            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+            IReadOnlyList<FileEntry> rankedFiles;
 
             if (string.IsNullOrWhiteSpace(query))
             {
                 // Show most recently selected files when query is empty
-                return files
-                    .Select(f => new SearchResult(f, _history.GetSelectionCount(f.FullPath), GetMoniker(imageService, f.FileName)))
-                    .Where(r => r.HistoryScore > 0)
-                    .OrderByDescending(r => r.HistoryScore)
-                    .ThenBy(r => r.FileName)
+                // Sort and take BEFORE getting monikers (expensive UI operation)
+                rankedFiles = [.. files
+                    .Select(f => (File: f, Score: history.GetSelectionCount(f.FullPath)))
+                    .Where(x => x.Score > 0)
+                    .OrderByDescending(x => x.Score)
+                    .ThenBy(x => x.File.FileName)
                     .Take(maxResults)
-                    .ToList();
+                    .Select(x => x.File)];
+            }
+            else
+            {
+                var queryLower = query.ToLowerInvariant();
+
+                // Filter, rank, and take BEFORE getting monikers
+                // Use IndexOf which is slightly faster than Contains for this pattern
+                rankedFiles = [.. files
+                    .Where(f => f.FileNameLower.IndexOf(queryLower, StringComparison.Ordinal) >= 0)
+                    .Select(f => (File: f, Score: history.GetSelectionCount(f.FullPath), StartsWithQuery: f.FileNameLower.StartsWith(queryLower, StringComparison.Ordinal)))
+                    .OrderByDescending(x => x.Score)
+                    .ThenByDescending(x => x.StartsWithQuery)
+                    .ThenBy(x => x.File.FileName)
+                    .Take(maxResults)
+                    .Select(x => x.File)];
             }
 
-            var queryLower = query.ToLowerInvariant();
+            // Only now switch to UI thread to get monikers - only for final results
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
 
-            // Filter matches (can be done off thread)
-            var matchedFiles = files
-                .Where(f => f.FileNameLower.Contains(queryLower))
-                .ToList();
+            // Create results with monikers - only for the limited result set
+            var results = new List<SearchResult>(rankedFiles.Count);
+            foreach (FileEntry f in rankedFiles)
+            {
+                results.Add(new SearchResult(f, history.GetSelectionCount(f.FullPath), GetMoniker(imageService, f.FileName)));
+            }
 
-            // Create results with monikers on UI thread
-            var matches = matchedFiles
-                .Select(f => new SearchResult(f, _history.GetSelectionCount(f.FullPath), GetMoniker(imageService, f.FileName)))
-                .ToList();
-
-            // Rank results: history score (descending), then exact start match, then alphabetical
-            return matches
-                .OrderByDescending(r => r.HistoryScore)
-                .ThenByDescending(r => r.FileNameLower.StartsWith(queryLower))
-                .ThenBy(r => r.FileName)
-                .Take(maxResults)
-                .ToList();
+            return results;
         }
 
         private static ImageMoniker GetMoniker(IVsImageService2 imageService, string fileName)
@@ -93,8 +91,8 @@ namespace InstaSearch.Services
         /// </summary>
         public async Task RecordSelectionAsync(string fullPath)
         {
-            _history.RecordSelection(fullPath);
-            await _history.SaveAsync();
+            history.RecordSelection(fullPath);
+            await history.SaveAsync();
         }
 
         /// <summary>
@@ -102,30 +100,20 @@ namespace InstaSearch.Services
         /// </summary>
         public void RefreshIndex(string rootPath = null)
         {
-            _indexer.InvalidateCache(rootPath);
+            indexer.InvalidateCache(rootPath);
         }
     }
 
     /// <summary>
     /// Represents a search result with ranking information.
     /// </summary>
-    public class SearchResult
+    public class SearchResult(FileEntry file, int historyScore, ImageMoniker moniker)
     {
-        public SearchResult(FileEntry file, int historyScore, ImageMoniker moniker)
-        {
-            FileName = file.FileName;
-            FullPath = file.FullPath;
-            RelativePath = file.RelativePath;
-            FileNameLower = file.FileNameLower;
-            HistoryScore = historyScore;
-            Moniker = moniker;
-        }
-
-        public string FileName { get; }
-        public string FullPath { get; }
-        public string RelativePath { get; }
-        public string FileNameLower { get; }
-        public int HistoryScore { get; }
-        public ImageMoniker Moniker { get; }
+        public string FileName { get; } = file.FileName;
+        public string FullPath { get; } = file.FullPath;
+        public string RelativePath { get; } = file.RelativePath;
+        public string FileNameLower { get; } = file.FileNameLower;
+        public int HistoryScore { get; } = historyScore;
+        public ImageMoniker Moniker { get; } = moniker;
     }
 }

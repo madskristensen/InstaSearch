@@ -106,15 +106,23 @@
                 </Grid>
             </Border>
 
-            <!-- Results List -->
+            <!-- Results List with UI Virtualization -->
             <ListBox x:Name="ResultsListBox"
                      Grid.Row="1"
                      BorderThickness="0"
                      Background="Transparent"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     ScrollViewer.CanContentScroll="True"
+                     VirtualizingStackPanel.IsVirtualizing="True"
+                     VirtualizingStackPanel.VirtualizationMode="Recycling"
                      ItemContainerStyle="{StaticResource SearchResultItemStyle}"
                      MouseDoubleClick="ResultsListBox_MouseDoubleClick"
                      SelectionChanged="ResultsListBox_SelectionChanged">
+                <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <VirtualizingStackPanel />
+                    </ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
                 <ListBox.ItemTemplate>
                     <DataTemplate>
                         <Grid>
@@ -125,7 +133,7 @@
 
                             <!-- File Icon using CrispImage -->
                             <imaging:CrispImage Grid.Column="0" 
-                                                Moniker="{Binding Moniker}" 
+                                                Moniker="{Binding Moniker, Mode=OneTime}" 
                                                 Width="16" 
                                                 Height="16" 
                                                 Margin="0,2,8,0"
@@ -133,11 +141,11 @@
 
                             <!-- File Name and Path -->
                             <StackPanel Grid.Column="1" Orientation="Vertical">
-                                <TextBlock Text="{Binding FileName}" 
+                                <TextBlock Text="{Binding FileName, Mode=OneTime}" 
                                            FontSize="13"
                                            FontWeight="SemiBold"
                                            Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"/>
-                                <TextBlock Text="{Binding FullPath}" 
+                                <TextBlock Text="{Binding RelativePath, Mode=OneTime}" 
                                            FontSize="10"
                                            Opacity="0.6"
                                            Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"

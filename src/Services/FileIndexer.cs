@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,7 +11,7 @@ namespace InstaSearch.Services
     /// </summary>
     public class FileIndexer
     {
-        private static readonly HashSet<string> IgnoredDirectories = new(StringComparer.OrdinalIgnoreCase)
+        private static readonly HashSet<string> _ignoredDirectories = new(StringComparer.OrdinalIgnoreCase)
         {
             ".git",
             ".vs",
@@ -39,7 +38,7 @@ namespace InstaSearch.Services
         {
             if (string.IsNullOrEmpty(rootPath) || !Directory.Exists(rootPath))
             {
-                return Array.Empty<FileEntry>();
+                return [];
             }
 
             rootPath = Path.GetFullPath(rootPath);
@@ -71,73 +70,78 @@ namespace InstaSearch.Services
 
         private List<FileEntry> IndexDirectory(string rootPath, CancellationToken cancellationToken)
         {
-            var results = new ConcurrentBag<FileEntry>();
-            var directories = new ConcurrentQueue<string>();
-            directories.Enqueue(rootPath);
-
-            var parallelOptions = new ParallelOptions
+            var results = new ConcurrentQueue<FileEntry>();
+            var pendingCount = 1; // Track outstanding work items
+            var directories = new BlockingCollection<string>
             {
-                CancellationToken = cancellationToken,
-                MaxDegreeOfParallelism = Environment.ProcessorCount
+                rootPath
             };
 
-            while (!directories.IsEmpty)
+            // Use a fixed thread pool for continuous work-stealing
+            var tasks = new Task[Environment.ProcessorCount];
+            for (var i = 0; i < tasks.Length; i++)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                var currentBatch = new List<string>();
-                while (directories.TryDequeue(out var dir))
+                tasks[i] = Task.Run(() =>
                 {
-                    currentBatch.Add(dir);
-                }
+                    // Each thread continuously pulls work until no work remains
+                    foreach (var directory in directories.GetConsumingEnumerable())
+                    {
+                        if (cancellationToken.IsCancellationRequested)
+                            break;
 
-                Parallel.ForEach(currentBatch, parallelOptions, directory =>
-                {
-                    ProcessDirectory(directory, rootPath, directories, results, cancellationToken);
-                });
+                        try
+                        {
+                            // Get subdirectories first - this adds more work
+                            foreach (var subDir in Directory.EnumerateDirectories(directory))
+                            {
+                                var dirName = Path.GetFileName(subDir);
+                                if (!_ignoredDirectories.Contains(dirName))
+                                {
+                                    Interlocked.Increment(ref pendingCount);
+                                    directories.Add(subDir);
+                                }
+                            }
+
+                            // Process files in this directory
+                            foreach (var file in Directory.EnumerateFiles(directory))
+                            {
+                                var fileName = Path.GetFileName(file);
+                                var relativePath = GetRelativePath(rootPath, file);
+                                results.Enqueue(new FileEntry(fileName, file, relativePath));
+                            }
+                        }
+                        catch (UnauthorizedAccessException) { }
+                        catch (DirectoryNotFoundException) { }
+
+                        // Decrement pending count; if zero, signal completion
+                        if (Interlocked.Decrement(ref pendingCount) == 0)
+                        {
+                            directories.CompleteAdding();
+                        }
+                    }
+                }, cancellationToken);
             }
 
-            return results.ToList();
-        }
-
-        private void ProcessDirectory(
-            string directory,
-            string rootPath,
-            ConcurrentQueue<string> directories,
-            ConcurrentBag<FileEntry> results,
-            CancellationToken cancellationToken)
-        {
             try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                // Get and enqueue subdirectories (excluding ignored ones)
-                foreach (var subDir in Directory.EnumerateDirectories(directory))
-                {
-                    var dirName = Path.GetFileName(subDir);
-                    if (!IgnoredDirectories.Contains(dirName))
-                    {
-                        directories.Enqueue(subDir);
-                    }
-                }
-
-                // Add all files in this directory
-                foreach (var file in Directory.EnumerateFiles(directory))
-                {
-                    var fileName = Path.GetFileName(file);
-                    var relativePath = GetRelativePath(rootPath, file);
-                    results.Add(new FileEntry(fileName, file, relativePath));
-                }
+                Task.WaitAll(tasks, cancellationToken);
             }
-            catch (UnauthorizedAccessException)
+            catch (OperationCanceledException)
             {
-                // Skip directories we can't access
+                directories.CompleteAdding();
+                throw;
             }
-            catch (DirectoryNotFoundException)
+
+            // Convert to list
+            var resultList = new List<FileEntry>(results.Count);
+            while (results.TryDequeue(out FileEntry entry))
             {
-                // Directory was deleted during enumeration
+                resultList.Add(entry);
             }
+            return resultList;
         }
+
+        // ProcessDirectory is no longer needed - logic moved inline above
 
         private static string GetRelativePath(string rootPath, string fullPath)
         {
@@ -153,19 +157,11 @@ namespace InstaSearch.Services
     /// <summary>
     /// Represents an indexed file entry.
     /// </summary>
-    public class FileEntry
+    public class FileEntry(string fileName, string fullPath, string relativePath)
     {
-        public FileEntry(string fileName, string fullPath, string relativePath)
-        {
-            FileName = fileName;
-            FullPath = fullPath;
-            RelativePath = relativePath;
-            FileNameLower = fileName.ToLowerInvariant();
-        }
-
-        public string FileName { get; }
-        public string FullPath { get; }
-        public string RelativePath { get; }
-        public string FileNameLower { get; }
+        public string FileName { get; } = fileName;
+        public string FullPath { get; } = fullPath;
+        public string RelativePath { get; } = relativePath;
+        public string FileNameLower { get; } = fileName.ToLowerInvariant();
     }
 }
