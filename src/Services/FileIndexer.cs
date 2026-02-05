@@ -79,7 +79,7 @@ namespace InstaSearch.Services
             rootPath = Path.GetFullPath(rootPath);
 
             // Fast path: cache hit and not dirty
-            if (_cache.TryGetValue(rootPath, out var cached) && !IsDirty(rootPath))
+            if (_cache.TryGetValue(rootPath, out IReadOnlyList<FileEntry> cached) && !IsDirty(rootPath))
             {
                 return cached;
             }
@@ -99,7 +99,7 @@ namespace InstaSearch.Services
                 _dirtyFlags[rootPath] = false;
 
                 // Run indexing on thread pool without blocking
-                var files = await Task.Run(() => IndexDirectory(rootPath, cancellationToken), cancellationToken).ConfigureAwait(false);
+                List<FileEntry> files = await Task.Run(() => IndexDirectory(rootPath, cancellationToken), cancellationToken).ConfigureAwait(false);
                 _cache[rootPath] = files;
 
                 // Start watching for changes after initial index (idempotent)
@@ -212,7 +212,7 @@ namespace InstaSearch.Services
 
         private void StopWatching(string rootPath)
         {
-            if (_watchers.TryRemove(rootPath, out var watcher))
+            if (_watchers.TryRemove(rootPath, out FileSystemWatcher watcher))
             {
                 // Unsubscribe to prevent leaks
                 watcher.Created -= Watcher_OnChanged;
@@ -235,21 +235,21 @@ namespace InstaSearch.Services
         private static bool IsInIgnoredDirectory(string rootPath, string fullPath, HashSet<string> ignoredDirectories)
         {
             // Optimized: scan the path without allocating substrings
-            int startIndex = rootPath.Length;
+            var startIndex = rootPath.Length;
             if (startIndex < fullPath.Length && (fullPath[startIndex] == Path.DirectorySeparatorChar || fullPath[startIndex] == Path.AltDirectorySeparatorChar))
             {
                 startIndex++;
             }
 
-            int segmentStart = startIndex;
-            for (int i = startIndex; i <= fullPath.Length; i++)
+            var segmentStart = startIndex;
+            for (var i = startIndex; i <= fullPath.Length; i++)
             {
                 if (i == fullPath.Length || fullPath[i] == Path.DirectorySeparatorChar || fullPath[i] == Path.AltDirectorySeparatorChar)
                 {
                     if (i > segmentStart)
                     {
                         // Check this segment against ignored directories
-                        int segmentLength = i - segmentStart;
+                        var segmentLength = i - segmentStart;
                         foreach (var ignored in ignoredDirectories)
                         {
                             if (ignored.Length == segmentLength && 
@@ -286,7 +286,7 @@ namespace InstaSearch.Services
         private List<FileEntry> IndexDirectory(string rootPath, CancellationToken cancellationToken)
         {
             // Get the current set of ignored directories from options
-            var ignoredDirectories = GetIgnoredDirectories();
+            HashSet<string> ignoredDirectories = GetIgnoredDirectories();
 
             // Use ConcurrentBag instead of ConcurrentQueue - better for parallel add scenarios
             // and allows direct conversion to List without dequeue loop

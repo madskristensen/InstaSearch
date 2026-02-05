@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Windows;
 using InstaSearch.Options;
 using InstaSearch.Services;
@@ -18,6 +19,9 @@ namespace InstaSearch
         private static readonly SearchRootResolver _rootResolver = new();
         private static RatingPrompt _ratingPrompt;
 
+        // Track the open dialog instance to prevent multiple windows
+        private static SearchDialog _openDialog;
+
         protected override async Task ExecuteAsync(OleMenuCmdEventArgs e)
         {
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
@@ -36,6 +40,13 @@ namespace InstaSearch
             // Get the image service for file icons
             IVsImageService2 imageService = await VS.GetServiceAsync<SVsImageService, IVsImageService2>();
 
+            // If dialog is already open, just activate it
+            if (_openDialog != null)
+            {
+                _openDialog.Activate();
+                return;
+            }
+
             // Get the main VS window for positioning
             Window mainWindow = Application.Current.MainWindow;
 
@@ -47,16 +58,26 @@ namespace InstaSearch
                 dialog.Owner = mainWindow;
             }
 
-            var result = dialog.ShowDialog();
+            dialog.Topmost = true;
+            dialog.FilesSelected += OnFilesSelected;
+            dialog.Closed += (s, args) => _openDialog = null;
+            _openDialog = dialog;
 
-            if (result == true && dialog.SelectedFiles.Count > 0)
+            dialog.Show();
+        }
+
+        private static async void OnFilesSelected(object sender, FilesSelectedEventArgs e)
+        {
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+            try
             {
-                var selectedFiles = dialog.SelectedFiles;
-                var lineNumber = dialog.SelectedLineNumber;
+                IReadOnlyList<SearchResult> selectedFiles = e.SelectedFiles;
+                var lineNumber = e.LineNumber;
 
                 // Open all selected files
                 DocumentView lastDocumentView = null;
-                foreach (var file in selectedFiles)
+                foreach (SearchResult file in selectedFiles)
                 {
                     // Record the selection for history
                     await _searchService.RecordSelectionAsync(file.FullPath);
@@ -76,6 +97,10 @@ namespace InstaSearch
                 _ratingPrompt ??= new RatingPrompt("MadsKristensen.InstaSearch", Vsix.Name, await General.GetLiveInstanceAsync());
                 _ratingPrompt.RegisterSuccessfulUsage();
             }
+            catch (Exception ex)
+            {
+                await VS.StatusBar.ShowMessageAsync($"Error opening file: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -92,7 +117,7 @@ namespace InstaSearch
                 ITextSnapshot snapshot = textView.TextSnapshot;
 
                 // Convert 1-based line number to 0-based index
-                int lineIndex = lineNumber - 1;
+                var lineIndex = lineNumber - 1;
 
                 // Clamp to valid range
                 if (lineIndex < 0)

@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using InstaSearch.Options;
 using InstaSearch.Services;
@@ -13,6 +14,15 @@ using TextChangedEventArgs = System.Windows.Controls.TextChangedEventArgs;
 
 namespace InstaSearch.UI
 {
+    /// <summary>
+    /// Event args for when files are selected in the search dialog.
+    /// </summary>
+    public class FilesSelectedEventArgs(IReadOnlyList<SearchResult> selectedFiles, int? lineNumber) : EventArgs
+    {
+        public IReadOnlyList<SearchResult> SelectedFiles { get; } = selectedFiles;
+        public int? LineNumber { get; } = lineNumber;
+    }
+
     /// <summary>
     /// Fast file search dialog with real-time results.
     /// </summary>
@@ -31,6 +41,11 @@ namespace InstaSearch.UI
         private List<SearchResult> _selectedResults = [];
         private string _pendingQuery;
         private int? _selectedLineNumber;
+
+        /// <summary>
+        /// Raised when files are selected and should be opened.
+        /// </summary>
+        public event EventHandler<FilesSelectedEventArgs> FilesSelected;
 
         /// <summary>
         /// Gets the selected files. Use this for multi-select scenarios.
@@ -67,6 +82,35 @@ namespace InstaSearch.UI
             _debounceTimer.Tick += DebounceTimer_Tick;
 
             Loaded += SearchDialog_Loaded;
+            LostKeyboardFocus += SearchDialog_LostKeyboardFocus;
+        }
+
+        private void SearchDialog_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+        {
+            // Only close if focus moved outside the dialog entirely
+            if (e.NewFocus is not DependencyObject newFocus || !IsDescendant(this, newFocus))
+            {
+                Close();
+            }
+        }
+
+        private static bool IsDescendant(DependencyObject parent, DependencyObject child)
+        {
+            DependencyObject current = child;
+            while (current != null)
+            {
+                if (current == parent)
+                {
+                    return true;
+                }
+
+                // Try visual tree first, fall back to logical tree (for TextElements like Hyperlink)
+                current = current is Visual
+                    ? VisualTreeHelper.GetParent(current)
+                    : LogicalTreeHelper.GetParent(current);
+            }
+
+            return false;
         }
 
         private async void SearchDialog_Loaded(object sender, RoutedEventArgs e)
@@ -103,8 +147,8 @@ namespace InstaSearch.UI
                 return (query, null);
             }
 
-            var match = _lineNumberPattern.Match(query);
-            if (match.Success && int.TryParse(match.Groups[1].Value, out int lineNumber) && lineNumber > 0)
+            Match match = _lineNumberPattern.Match(query);
+            if (match.Success && int.TryParse(match.Groups[1].Value, out var lineNumber) && lineNumber > 0)
             {
                 // Remove the :lineNumber suffix from the search query
                 var searchQuery = query.Substring(0, match.Index);
@@ -126,7 +170,7 @@ namespace InstaSearch.UI
                 StatusText.Text = "Searching...";
 
                 // Parse line number from query (e.g., "file.cs:42")
-                var (searchQuery, lineNumber) = ParseQueryWithLineNumber(query);
+                (string searchQuery, int? lineNumber) = ParseQueryWithLineNumber(query);
                 _selectedLineNumber = lineNumber;
 
                 IReadOnlyList<SearchResult> results = await _searchService.SearchAsync(_rootPath, searchQuery, _imageService, 100, token);
@@ -163,7 +207,7 @@ namespace InstaSearch.UI
 
         private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
         {
-            bool shiftHeld = (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift;
+            var shiftHeld = (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift;
 
             switch (e.Key)
             {
@@ -222,7 +266,7 @@ namespace InstaSearch.UI
                     // Only navigate results when Shift is not pressed (Shift+End selects text in search box)
                     if (!shiftHeld && ResultsListBox.Items.Count > 0)
                     {
-                        int lastIndex = ResultsListBox.Items.Count - 1;
+                        var lastIndex = ResultsListBox.Items.Count - 1;
                         _selectionAnchor = lastIndex;
                         _focusIndex = lastIndex;
                         ResultsListBox.SelectedIndex = lastIndex;
@@ -248,7 +292,7 @@ namespace InstaSearch.UI
                 _focusIndex = ResultsListBox.SelectedIndex >= 0 ? ResultsListBox.SelectedIndex : 0;
             }
 
-            int newIndex = _focusIndex + delta;
+            var newIndex = _focusIndex + delta;
             newIndex = Math.Max(0, Math.Min(newIndex, ResultsListBox.Items.Count - 1));
 
             if (extendSelection)
@@ -285,12 +329,12 @@ namespace InstaSearch.UI
             _focusIndex = targetIndex;
 
             // Calculate range
-            int start = Math.Min(_selectionAnchor, targetIndex);
-            int end = Math.Max(_selectionAnchor, targetIndex);
+            var start = Math.Min(_selectionAnchor, targetIndex);
+            var end = Math.Max(_selectionAnchor, targetIndex);
 
             // Clear and select range
             ResultsListBox.SelectedItems.Clear();
-            for (int i = start; i <= end; i++)
+            for (var i = start; i <= end; i++)
             {
                 ResultsListBox.SelectedItems.Add(ResultsListBox.Items[i]);
             }
@@ -305,7 +349,7 @@ namespace InstaSearch.UI
 
             if (_selectedResults.Count > 0)
             {
-                DialogResult = true;
+                FilesSelected?.Invoke(this, new FilesSelectedEventArgs(_selectedResults, _selectedLineNumber));
                 Close();
             }
         }
