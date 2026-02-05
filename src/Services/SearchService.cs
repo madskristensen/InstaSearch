@@ -46,7 +46,7 @@ namespace InstaSearch.Services
                 // Use heap-based selection for O(n log k) instead of O(n log n) full sort
                 rankedFiles = SelectTopN(
                     files.Where(f => history.GetSelectionCount(f.FullPath) > 0 && !IsExcludedByPattern(f.FileNameLower)),
-                    f => new RankedFile(f, history.GetSelectionCount(f.FullPath), false, IsCodeFile(f.FileName)),
+                    f => new RankedFile(f, history.GetSelectionCount(f.FullPath), false, false, IsCodeFile(f.FileName), f.FileNameLower.Length),
                     maxResults);
 
                 // Empty query - no highlighting needed
@@ -73,7 +73,7 @@ namespace InstaSearch.Services
                 // Use heap-based selection for O(n log k) instead of O(n log n) full sort
                 rankedFiles = SelectTopN(
                     files.Where(f => wildcardPattern.Matches(f.FileNameLower) && !IsExcludedByPattern(f.FileNameLower)),
-                    f => new RankedFile(f, history.GetSelectionCount(f.FullPath), wildcardPattern.StartsWithFirstSegment(f.FileNameLower), IsCodeFile(f.FileName)),
+                    f => new RankedFile(f, history.GetSelectionCount(f.FullPath), false, wildcardPattern.StartsWithFirstSegment(f.FileNameLower), IsCodeFile(f.FileName), f.FileNameLower.Length),
                     maxResults);
             }
             else
@@ -81,7 +81,7 @@ namespace InstaSearch.Services
                 // Use heap-based selection for O(n log k) instead of O(n log n) full sort
                 rankedFiles = SelectTopN(
                     files.Where(f => f.FileNameLower.IndexOf(queryLower, StringComparison.Ordinal) >= 0 && !IsExcludedByPattern(f.FileNameLower)),
-                    f => new RankedFile(f, history.GetSelectionCount(f.FullPath), f.FileNameLower.StartsWith(queryLower, StringComparison.Ordinal), IsCodeFile(f.FileName)),
+                    f => new RankedFile(f, history.GetSelectionCount(f.FullPath), IsExactFileNameMatch(f.FileNameLower, queryLower), f.FileNameLower.StartsWith(queryLower, StringComparison.Ordinal), IsCodeFile(f.FileName), f.FileNameLower.Length),
                     maxResults);
             }
 
@@ -131,15 +131,18 @@ namespace InstaSearch.Services
         /// <summary>
         /// Ranked file entry for sorting. Using struct to avoid allocations.
         /// </summary>
-        private readonly struct RankedFile(FileEntry file, int score, bool startsWithQuery, bool isCodeFile) : IComparable<RankedFile>
+        private readonly struct RankedFile(FileEntry file, int score, bool isExactMatch, bool startsWithQuery, bool isCodeFile, int fileNameLength) : IComparable<RankedFile>
         {
             public readonly FileEntry File = file;
             public readonly int Score = score;
+            public readonly bool IsExactMatch = isExactMatch;
             public readonly bool StartsWithQuery = startsWithQuery;
             public readonly bool IsCodeFile = isCodeFile;
+            public readonly int FileNameLength = fileNameLength;
 
             /// <summary>
-            /// Compare for descending score, descending isCodeFile, descending startsWithQuery, ascending filename.
+            /// Compare for descending score, descending isCodeFile, descending isExactMatch,
+            /// descending startsWithQuery, ascending filename length, ascending filename.
             /// Returns negative if this should come BEFORE other in sorted order.
             /// </summary>
             public int CompareTo(RankedFile other)
@@ -149,16 +152,46 @@ namespace InstaSearch.Services
                 if (scoreCompare != 0) return scoreCompare;
 
                 // Code files first (descending - true > false)
-                var codeCompare = IsCodeFile.CompareTo(other.IsCodeFile);
-                if (codeCompare != 0) return -codeCompare;
+                var codeCompare = other.IsCodeFile.CompareTo(IsCodeFile);
+                if (codeCompare != 0) return codeCompare;
+
+                // Exact match first (descending)
+                var exactCompare = other.IsExactMatch.CompareTo(IsExactMatch);
+                if (exactCompare != 0) return exactCompare;
 
                 // StartsWithQuery=true first (descending)
                 var startsCompare = other.StartsWithQuery.CompareTo(StartsWithQuery);
                 if (startsCompare != 0) return startsCompare;
 
+                // Shorter filenames first (ascending) - query covers more of the name
+                var lengthCompare = FileNameLength.CompareTo(other.FileNameLength);
+                if (lengthCompare != 0) return lengthCompare;
+
                 // Alphabetical by filename (ascending)
                 return string.Compare(File.FileName, other.File.FileName, StringComparison.Ordinal);
             }
+        }
+
+        /// <summary>
+        /// Checks if the query is an exact match for the filename (with or without extension).
+        /// For example, query "searchcommand" matches "SearchCommand.cs" exactly.
+        /// </summary>
+        private static bool IsExactFileNameMatch(string fileNameLower, string queryLower)
+        {
+            // Exact match including extension (e.g., "readme.md" matches "readme.md")
+            if (fileNameLower.Length == queryLower.Length)
+            {
+                return fileNameLower.Equals(queryLower, StringComparison.Ordinal);
+            }
+
+            // Exact match on name without extension (e.g., "searchcommand" matches "searchcommand.cs")
+            var extIndex = fileNameLower.LastIndexOf('.');
+            if (extIndex > 0 && extIndex == queryLower.Length)
+            {
+                return fileNameLower.StartsWith(queryLower, StringComparison.Ordinal);
+            }
+
+            return false;
         }
 
         /// <summary>

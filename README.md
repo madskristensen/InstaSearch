@@ -121,8 +121,10 @@ Results are ranked by:
 
 1. History score (files you have opened before are ranked higher)
 2. File type (code/text files are prioritized over binary files like images, executables, etc.)
-3. Whether the filename starts with your query
-4. Alphabetical order
+3. Exact match (query matches filename with or without extension, e.g., `dialog` → `Dialog.cs`)
+4. Whether the filename starts with your query
+5. Shorter filenames first (closer matches where the query covers more of the name)
+6. Alphabetical order
 
 Only the top 100 results are returned. File icons are fetched only for these final results, avoiding unnecessary work for matches that will not be displayed.
 
