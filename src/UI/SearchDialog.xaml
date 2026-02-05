@@ -23,10 +23,10 @@
         PreviewKeyDown="Window_PreviewKeyDown">
 
     <Window.Resources>
-        <!-- VS-themed ListBox item style -->
+        <!-- VS-themed ListBox item style with left accent border on selection -->
         <Style x:Key="SearchResultItemStyle" TargetType="ListBoxItem">
-            <Setter Property="Padding" Value="8,6"/>
-            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="6,4"/>
+            <Setter Property="BorderThickness" Value="2,0,0,0"/>
             <Setter Property="BorderBrush" Value="Transparent"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Foreground" Value="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"/>
@@ -37,8 +37,7 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                Padding="{TemplateBinding Padding}"
-                                CornerRadius="3">
+                                Padding="{TemplateBinding Padding}">
                             <ContentPresenter/>
                         </Border>
                         <ControlTemplate.Triggers>
@@ -46,7 +45,7 @@
                                 <Setter TargetName="Bd" Property="Background" 
                                         Value="{DynamicResource {x:Static vs:EnvironmentColors.CommandBarSelectedBrushKey}}"/>
                                 <Setter TargetName="Bd" Property="BorderBrush" 
-                                        Value="{DynamicResource {x:Static vs:EnvironmentColors.CommandBarSelectedBorderBrushKey}}"/>
+                                        Value="{DynamicResource {x:Static vs:EnvironmentColors.FileTabSelectedBorderBrushKey}}"/>
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Bd" Property="Background" 
@@ -60,7 +59,7 @@
                                 <Setter TargetName="Bd" Property="Background" 
                                         Value="{DynamicResource {x:Static vs:EnvironmentColors.CommandBarHoverOverSelectedBrushKey}}"/>
                                 <Setter TargetName="Bd" Property="BorderBrush" 
-                                        Value="{DynamicResource {x:Static vs:EnvironmentColors.CommandBarHoverOverSelectedIconBorderBrushKey}}"/>
+                                        Value="{DynamicResource {x:Static vs:EnvironmentColors.FileTabSelectedBorderBrushKey}}"/>
                             </MultiTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -71,7 +70,6 @@
 
     <Border BorderBrush="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowBorderBrushKey}}"
             BorderThickness="1"
-            CornerRadius="4"
             ClipToBounds="True">
         <Grid Margin="0">
             <Grid.RowDefinitions>
@@ -81,36 +79,41 @@
             </Grid.RowDefinitions>
 
             <!-- Search Box -->
-            <Border Grid.Row="0" 
-                    Background="{DynamicResource {x:Static vs:EnvironmentColors.SearchBoxBackgroundBrushKey}}"
-                    BorderBrush="{DynamicResource {x:Static vs:EnvironmentColors.SearchBoxBorderBrushKey}}"
+            <Border Grid.Row="0"
+                    Background="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowBackgroundBrushKey}}"
+                    BorderBrush="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowBorderBrushKey}}"
                     BorderThickness="0,0,0,1"
-                    CornerRadius="3,3,0,0"
-                    Padding="8">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    
-                    <!-- Search Icon -->
-                    <imaging:CrispImage Grid.Column="0"
-                                        Moniker="{x:Static catalog:KnownMonikers.Search}"
-                                        Width="16"
-                                        Height="16"
-                                        VerticalAlignment="Center"
-                                        Margin="0,0,8,0"/>
-                    
-                    <TextBox x:Name="SearchTextBox"
-                             Grid.Column="1"
-                             FontSize="14"
-                             Padding="4"
-                             BorderThickness="0"
-                             Background="Transparent"
-                             Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"
-                             CaretBrush="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"
-                             TextChanged="SearchTextBox_TextChanged"/>
-                </Grid>
+                    Padding="8,6">
+                <!-- Bordered input field matching VS Go To All -->
+                <Border Background="{DynamicResource {x:Static vs:EnvironmentColors.SearchBoxBackgroundBrushKey}}"
+                        BorderBrush="{DynamicResource {x:Static vs:EnvironmentColors.SearchBoxBorderBrushKey}}"
+                        BorderThickness="1"
+                        Padding="4,2">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Search Icon -->
+                        <imaging:CrispImage Grid.Column="0"
+                                            Moniker="{x:Static catalog:KnownMonikers.Search}"
+                                            Width="16"
+                                            Height="16"
+                                            VerticalAlignment="Center"
+                                            Margin="2,0,6,0"/>
+
+                        <TextBox x:Name="SearchTextBox"
+                                 Grid.Column="1"
+                                 FontSize="14"
+                                 Padding="2"
+                                 BorderThickness="0"
+                                 Background="Transparent"
+                                 Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                 CaretBrush="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                 TextChanged="SearchTextBox_TextChanged"/>
+                    </Grid>
+                </Border>
             </Border>
 
             <!-- Results List with UI Virtualization -->
@@ -125,7 +128,8 @@
                      VirtualizingStackPanel.VirtualizationMode="Recycling"
                      ItemContainerStyle="{StaticResource SearchResultItemStyle}"
                      MouseDoubleClick="ResultsListBox_MouseDoubleClick"
-                     SelectionChanged="ResultsListBox_SelectionChanged">
+                     SelectionChanged="ResultsListBox_SelectionChanged"
+                     Margin="0,2,0,0">
                 <ListBox.ItemsPanel>
                     <ItemsPanelTemplate>
                         <VirtualizingStackPanel />
@@ -133,7 +137,7 @@
                 </ListBox.ItemsPanel>
                 <ListBox.ItemTemplate>
                     <DataTemplate>
-                        <Grid>
+                        <Grid Margin="4,1,0,1">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="*"/>
@@ -156,9 +160,10 @@
                                                           Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"/>
                                 <TextBlock Text="{Binding RelativePath, Mode=OneTime}" 
                                            FontSize="10"
-                                           Opacity="0.6"
+                                           Opacity="0.55"
                                            Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"
-                                           TextTrimming="CharacterEllipsis"/>
+                                           TextTrimming="CharacterEllipsis"
+                                           Margin="0,1,0,0"/>
                             </StackPanel>
                         </Grid>
                     </DataTemplate>
@@ -167,11 +172,9 @@
 
             <!-- Status Bar -->
             <Border Grid.Row="2"
-                    Background="{DynamicResource {x:Static vs:EnvironmentColors.CommandBarGradientBrushKey}}"
                     BorderBrush="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowBorderBrushKey}}"
                     BorderThickness="0,1,0,0"
-                    CornerRadius="0,0,3,3"
-                    Padding="8,4">
+                    Padding="10,4">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
@@ -182,6 +185,7 @@
                                Grid.Column="0"
                                FontSize="11"
                                VerticalAlignment="Center"
+                               Opacity="0.7"
                                Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"/>
 
                     <!-- Refresh Link -->
@@ -200,9 +204,9 @@
                     <TextBlock Grid.Column="2"
                                FontSize="11"
                                VerticalAlignment="Center"
-                               Opacity="0.7"
+                               Opacity="0.5"
                                Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"
-                               Text="Enter Open • Ctrl+Enter Keep Open • Esc Close"/>
+                               Text="Enter Open · Ctrl+Enter Keep Open · Esc Close"/>
                 </Grid>
             </Border>
         </Grid>
