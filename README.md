@@ -48,17 +48,17 @@ Append `:lineNumber` to your search query to jump directly to a specific line af
 
 ### Keyboard Shortcuts
 
-| Key                       | Action                              |
-| ------------------------- | ----------------------------------- |
-| `Alt+Space`               | Open Insta Search                   |
-| `Up` / `Down`             | Navigate results                    |
-| `Shift+Up` / `Shift+Down` | Extend selection                    |
-| `Page Up` / `Page Down`   | Jump 10 items                       |
-| `Enter`                   | Open selected file(s)               |
-| `Ctrl+Enter`              | Open file and keep dialog open      |
-| `Ctrl+Click`              | Add/remove file from selection      |
-| `Shift+Click`             | Select range of files               |
-| `Esc`                     | Close dialog                        |
+| Key                       | Action                         |
+| ------------------------- | ------------------------------ |
+| `Alt+Space`               | Open Insta Search              |
+| `Up` / `Down`             | Navigate results               |
+| `Shift+Up` / `Shift+Down` | Extend selection               |
+| `Page Up` / `Page Down`   | Jump 10 items                  |
+| `Enter`                   | Open selected file(s)          |
+| `Ctrl+Enter`              | Open file and keep dialog open |
+| `Ctrl+Click`              | Add/remove file from selection |
+| `Shift+Click`             | Select range of files          |
+| `Esc`                     | Close dialog                   |
 
 ### Multi-Select
 
@@ -84,11 +84,25 @@ The resulting file list is cached in memory. Subsequent searches reuse this cach
 
 Configure InstaSearch via **Tools > Options > InstaSearch > General**:
 
-| Setting         | Description                                                    |
-| --------------- | -------------------------------------------------------------- |
-| Ignored Folders | Comma-separated list of folder names to exclude from indexing. |
+| Setting             | Description                                                                      |
+| ------------------- | -------------------------------------------------------------------------------- |
+| Ignored Folders     | Comma-separated list of folder names to exclude from indexing.                   |
+| Take over Go To All | When enabled, `Ctrl+T` and `Ctrl+,` will open Insta Search instead of Go To All. |
 
 Changes to ignored folders take effect on the next search (the index is automatically refreshed).
+
+### Go To All Integration
+
+By default, Insta Search intercepts the built-in **Go To All** command (`Ctrl+T` / `Ctrl+,`) when invoked via keyboard shortcut. This lets you use Insta Search as your primary file navigation tool without changing keybindings.
+
+The interception only occurs when:
+
+- The **Take over Go To All** option is enabled (default: on)
+- The command is triggered via keyboard (holding `Ctrl`)
+
+Invoking Go To All from the menu (**Edit > Go To > Go To All**) will still open the standard Visual Studio dialog, allowing you to access symbol search and other Go To All features when needed.
+
+To disable this behavior, uncheck **Take over Go To All** in **Tools > Options > InstaSearch > General**.
 
 ### Live Updates
 

@@ -4,6 +4,7 @@ global using Microsoft.VisualStudio.Shell;
 global using Task = System.Threading.Tasks.Task;
 using System.Runtime.InteropServices;
 using System.Threading;
+using InstaSearch.Commands;
 using InstaSearch.Options;
 
 namespace InstaSearch
@@ -18,6 +19,7 @@ namespace InstaSearch
         protected override async Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress)
         {
             await this.RegisterCommandsAsync();
+            await GoToIntercepter.InitializeAsync();
         }
     }
 }

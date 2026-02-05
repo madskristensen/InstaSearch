@@ -28,6 +28,13 @@ namespace InstaSearch.Options
         [DefaultValue(_defaultIgnoredFolders)]
         public string IgnoredFolders { get; set; } = _defaultIgnoredFolders;
 
+        [Category("Search")]
+        [DisplayName("Take over Go To All")]
+        [Description("When true, this setting will take over Ctrl+T and Ctrl+P for the built in Go To All command.")]
+        [DefaultValue(true)]
+        public bool TakeOverGoToAll { get; set; } = true;
+
+
         [Browsable(false)]
         public int RatingRequests { get; set; }
 
