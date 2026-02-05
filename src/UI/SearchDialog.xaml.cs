@@ -18,7 +18,7 @@ namespace InstaSearch.UI
     /// </summary>
     public partial class SearchDialog : Window
     {
-        private const int _debounceDelayMs = 150;
+        private const int _debounceDelayMs = 50;
 
         // Regex to match :lineNumber at the end of the query (e.g., "file.cs:42")
         private static readonly Regex _lineNumberPattern = new(@":(\d+)$", RegexOptions.Compiled);
@@ -224,8 +224,8 @@ namespace InstaSearch.UI
                     e.Handled = true;
                     break;
 
-                // Home and End keys are reserved for text navigation in the search box
-                // and are not used for result list navigation
+                    // Home and End keys are reserved for text navigation in the search box
+                    // and are not used for result list navigation
             }
         }
 
@@ -295,9 +295,7 @@ namespace InstaSearch.UI
         private void SelectCurrentItem()
         {
             // Get all selected items (supports multi-select with Ctrl+Click or Shift+Click)
-            _selectedResults = ResultsListBox.SelectedItems
-                .Cast<SearchResult>()
-                .ToList();
+            _selectedResults = [.. ResultsListBox.SelectedItems.Cast<SearchResult>()];
 
             if (_selectedResults.Count > 0)
             {
