@@ -45,7 +45,7 @@ namespace InstaSearch.Services
                 // Use heap-based selection for O(n log k) instead of O(n log n) full sort
                 rankedFiles = SelectTopN(
                     files.Where(f => history.GetSelectionCount(f.FullPath) > 0),
-                    f => new RankedFile(f, history.GetSelectionCount(f.FullPath), false),
+                    f => new RankedFile(f, history.GetSelectionCount(f.FullPath), false, IsCodeFile(f.FileName)),
                     maxResults);
 
                 // Empty query - no highlighting needed
@@ -72,7 +72,7 @@ namespace InstaSearch.Services
                 // Use heap-based selection for O(n log k) instead of O(n log n) full sort
                 rankedFiles = SelectTopN(
                     files.Where(f => wildcardPattern.Matches(f.FileNameLower)),
-                    f => new RankedFile(f, history.GetSelectionCount(f.FullPath), wildcardPattern.StartsWithFirstSegment(f.FileNameLower)),
+                    f => new RankedFile(f, history.GetSelectionCount(f.FullPath), wildcardPattern.StartsWithFirstSegment(f.FileNameLower), IsCodeFile(f.FileName)),
                     maxResults);
             }
             else
@@ -80,7 +80,7 @@ namespace InstaSearch.Services
                 // Use heap-based selection for O(n log k) instead of O(n log n) full sort
                 rankedFiles = SelectTopN(
                     files.Where(f => f.FileNameLower.IndexOf(queryLower, StringComparison.Ordinal) >= 0),
-                    f => new RankedFile(f, history.GetSelectionCount(f.FullPath), f.FileNameLower.StartsWith(queryLower, StringComparison.Ordinal)),
+                    f => new RankedFile(f, history.GetSelectionCount(f.FullPath), f.FileNameLower.StartsWith(queryLower, StringComparison.Ordinal), IsCodeFile(f.FileName)),
                     maxResults);
             }
 
@@ -106,16 +106,39 @@ namespace InstaSearch.Services
         private static readonly char[] _wildcardSeparator = ['*'];
 
         /// <summary>
+        /// File extensions that are typically not edited in VS (binary, media, etc.).
+        /// These will be deprioritized in search results.
+        /// </summary>
+        private static readonly HashSet<string> _binaryExtensions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            // Images
+            ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".svg", ".webp", ".tiff", ".tif",
+            // Video/Audio
+            ".mp4", ".avi", ".mov", ".wmv", ".mp3", ".wav", ".ogg", ".flac",
+            // Executables/Binaries
+            ".exe", ".dll", ".pdb", ".obj", ".lib", ".so", ".dylib",
+            // Archives
+            ".zip", ".7z", ".rar", ".tar", ".gz", ".nupkg",
+            // Fonts
+            ".ttf", ".otf", ".woff", ".woff2", ".eot",
+            // Documents (typically not edited in VS)
+            ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+            // Other binary
+            ".bin", ".dat", ".db", ".sqlite", ".mdb"
+        };
+
+        /// <summary>
         /// Ranked file entry for sorting. Using struct to avoid allocations.
         /// </summary>
-        private readonly struct RankedFile(FileEntry file, int score, bool startsWithQuery) : IComparable<RankedFile>
+        private readonly struct RankedFile(FileEntry file, int score, bool startsWithQuery, bool isCodeFile) : IComparable<RankedFile>
         {
             public readonly FileEntry File = file;
             public readonly int Score = score;
             public readonly bool StartsWithQuery = startsWithQuery;
+            public readonly bool IsCodeFile = isCodeFile;
 
             /// <summary>
-            /// Compare for descending score, descending startsWithQuery, ascending filename.
+            /// Compare for descending score, descending isCodeFile, descending startsWithQuery, ascending filename.
             /// Returns negative if this should come BEFORE other in sorted order.
             /// </summary>
             public int CompareTo(RankedFile other)
@@ -124,6 +147,10 @@ namespace InstaSearch.Services
                 var scoreCompare = other.Score.CompareTo(Score);
                 if (scoreCompare != 0) return scoreCompare;
 
+                // Code files first (descending - true > false)
+                var codeCompare = IsCodeFile.CompareTo(other.IsCodeFile);
+                if (codeCompare != 0) return -codeCompare;
+
                 // StartsWithQuery=true first (descending)
                 var startsCompare = other.StartsWithQuery.CompareTo(StartsWithQuery);
                 if (startsCompare != 0) return startsCompare;
@@ -131,6 +158,15 @@ namespace InstaSearch.Services
                 // Alphabetical by filename (ascending)
                 return string.Compare(File.FileName, other.File.FileName, StringComparison.Ordinal);
             }
+        }
+
+        /// <summary>
+        /// Checks if a file is a code/text file (not a binary file like images, executables, etc.).
+        /// </summary>
+        private static bool IsCodeFile(string fileName)
+        {
+            var extension = System.IO.Path.GetExtension(fileName);
+            return !_binaryExtensions.Contains(extension);
         }
 
         /// <summary>

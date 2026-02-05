@@ -36,7 +36,6 @@ Press `Alt+Space` to open the search dialog (or find it under **Edit > Go To > F
 | ------------ | ------------------------------------------ |
 | `dialog`     | Any file containing "dialog"               |
 | `test*.cs`   | Files starting with "test" ending in ".cs" |
-| `*service*`  | Files containing "service" anywhere        |
 | `*.xaml`     | All XAML files                             |
 | `file.cs:42` | Opens file.cs and navigates to line 42     |
 
@@ -106,8 +105,9 @@ When you type a query, Insta Search filters the cached file list using case-inse
 Results are ranked by:
 
 1. History score (files you have opened before are ranked higher)
-2. Whether the filename starts with your query
-3. Alphabetical order
+2. File type (code/text files are prioritized over binary files like images, executables, etc.)
+3. Whether the filename starts with your query
+4. Alphabetical order
 
 Only the top 100 results are returned. File icons are fetched only for these final results, avoiding unnecessary work for matches that will not be displayed.
 
