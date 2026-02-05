@@ -32,12 +32,30 @@ Press `Alt+Space` to open the search dialog (or find it under **Edit > Go To > F
 
 ### Search Patterns
 
-| Pattern      | Matches                                    |
-| ------------ | ------------------------------------------ |
-| `dialog`     | Any file containing "dialog"               |
-| `test*.cs`   | Files starting with "test" ending in ".cs" |
-| `*.xaml`     | All XAML files                             |
-| `file.cs:42` | Opens file.cs and navigates to line 42     |
+| Pattern             | Matches                                           |
+| ------------------- | ------------------------------------------------- |
+| `dialog`            | Any file containing "dialog"                      |
+| `test*.cs`          | Files starting with "test" ending in ".cs"        |
+| `*.xaml`            | All XAML files                                    |
+| `file.cs:42`        | Opens file.cs and navigates to line 42            |
+| `dialog .cs .ts`    | Files containing "dialog" with .cs or .ts extension |
+| `dialog -.xaml`     | Files containing "dialog", excluding .xaml files  |
+| `dialog \src\`      | Files containing "dialog" under a `src` folder    |
+| `.cs \tests\`       | All .cs files under a `tests` folder              |
+
+### Search Filters
+
+You can append space-separated modifiers to any search query:
+
+- **Extension include** (`.ext`): Only show files with the given extension. Use multiple to match any of them.
+  - `service .cs .ts` → files containing "service" that end in `.cs` or `.ts`
+- **Extension exclude** (`-.ext`): Hide files with the given extension.
+  - `dialog -.designer.cs -.g.cs` → files containing "dialog", excluding generated files
+- **Path filter** (`\folder\`): Only show files whose relative path contains the folder segment.
+  - `controller \api\` → files containing "controller" under an `api` folder
+  - `\src\ .cs` → all `.cs` files under `src` (no text query needed)
+
+Filters can be combined freely: `service \src\ .cs -.designer.cs`
 
 ### Go-to-Line
 
@@ -116,6 +134,8 @@ If the FileSystemWatcher fails to start (for example, on a network drive), Insta
 ### Searching
 
 When you type a query, Insta Search filters the cached file list using case-insensitive substring matching. If your query contains wildcards (`*`), it splits the pattern into segments and checks that each segment appears in order within the filename. For example, `test*.cs` becomes `["test", ".cs"]` and matches any filename that starts with "test" and ends with ".cs".
+
+Space-separated modifiers (`.ext`, `-.ext`, `\folder\`) are parsed out of the query once per keystroke. The remaining text is the core search term. During matching, each file is checked against all active filters using simple `EndsWith` / `IndexOf` comparisons — zero allocations per file, same as the core substring/wildcard matching.
 
 Results are ranked by:
 

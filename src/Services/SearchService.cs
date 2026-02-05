@@ -40,7 +40,10 @@ namespace InstaSearch.Services
 
             IReadOnlyList<FileEntry> rankedFiles;
 
-            if (string.IsNullOrWhiteSpace(query))
+            // Parse query into core text + optional extension/path filters (once per keystroke)
+            var searchQuery = SearchQuery.Parse(query);
+
+            if (searchQuery.Text.Length == 0 && !searchQuery.HasFilters)
             {
                 // Show most recently selected files when query is empty
                 // Use heap-based selection for O(n log k) instead of O(n log n) full sort
@@ -60,35 +63,61 @@ namespace InstaSearch.Services
                 return historyResults;
             }
 
-            var queryLower = query.ToLowerInvariant();
+            var queryLower = searchQuery.Text;
 
-            // Check if query contains wildcards
-            var hasWildcard = queryLower.Contains('*');
-
-            if (hasWildcard)
+            if (queryLower.Length == 0)
+            {
+                // Filters only, no text query - show all files matching filters
+                rankedFiles = SelectTopN(
+                    files.Where(f => searchQuery.PassesFilters(f.FileNameLower, f.RelativePathLower) && !IsExcludedByPattern(f.FileNameLower)),
+                    f => new RankedFile(f, history.GetSelectionCount(f.FullPath), false, false, IsCodeFile(f.FileName), f.FileNameLower.Length),
+                    maxResults);
+            }
+            else if (searchQuery.HasWildcard)
             {
                 // Pre-parse wildcard pattern once - avoids allocations during matching
                 var wildcardPattern = new WildcardPattern(queryLower);
 
                 // Use heap-based selection for O(n log k) instead of O(n log n) full sort
-                rankedFiles = SelectTopN(
-                    files.Where(f => wildcardPattern.Matches(f.FileNameLower) && !IsExcludedByPattern(f.FileNameLower)),
-                    f => new RankedFile(f, history.GetSelectionCount(f.FullPath), false, wildcardPattern.StartsWithFirstSegment(f.FileNameLower), IsCodeFile(f.FileName), f.FileNameLower.Length),
-                    maxResults);
+                if (searchQuery.HasFilters)
+                {
+                    rankedFiles = SelectTopN(
+                        files.Where(f => wildcardPattern.Matches(f.FileNameLower) && searchQuery.PassesFilters(f.FileNameLower, f.RelativePathLower) && !IsExcludedByPattern(f.FileNameLower)),
+                        f => new RankedFile(f, history.GetSelectionCount(f.FullPath), false, wildcardPattern.StartsWithFirstSegment(f.FileNameLower), IsCodeFile(f.FileName), f.FileNameLower.Length),
+                        maxResults);
+                }
+                else
+                {
+                    rankedFiles = SelectTopN(
+                        files.Where(f => wildcardPattern.Matches(f.FileNameLower) && !IsExcludedByPattern(f.FileNameLower)),
+                        f => new RankedFile(f, history.GetSelectionCount(f.FullPath), false, wildcardPattern.StartsWithFirstSegment(f.FileNameLower), IsCodeFile(f.FileName), f.FileNameLower.Length),
+                        maxResults);
+                }
             }
             else
             {
                 // Use heap-based selection for O(n log k) instead of O(n log n) full sort
-                rankedFiles = SelectTopN(
-                    files.Where(f => f.FileNameLower.IndexOf(queryLower, StringComparison.Ordinal) >= 0 && !IsExcludedByPattern(f.FileNameLower)),
-                    f => new RankedFile(f, history.GetSelectionCount(f.FullPath), IsExactFileNameMatch(f.FileNameLower, queryLower), f.FileNameLower.StartsWith(queryLower, StringComparison.Ordinal), IsCodeFile(f.FileName), f.FileNameLower.Length),
-                    maxResults);
+                if (searchQuery.HasFilters)
+                {
+                    rankedFiles = SelectTopN(
+                        files.Where(f => f.FileNameLower.IndexOf(queryLower, StringComparison.Ordinal) >= 0 && searchQuery.PassesFilters(f.FileNameLower, f.RelativePathLower) && !IsExcludedByPattern(f.FileNameLower)),
+                        f => new RankedFile(f, history.GetSelectionCount(f.FullPath), IsExactFileNameMatch(f.FileNameLower, queryLower), f.FileNameLower.StartsWith(queryLower, StringComparison.Ordinal), IsCodeFile(f.FileName), f.FileNameLower.Length),
+                        maxResults);
+                }
+                else
+                {
+                    rankedFiles = SelectTopN(
+                        files.Where(f => f.FileNameLower.IndexOf(queryLower, StringComparison.Ordinal) >= 0 && !IsExcludedByPattern(f.FileNameLower)),
+                        f => new RankedFile(f, history.GetSelectionCount(f.FullPath), IsExactFileNameMatch(f.FileNameLower, queryLower), f.FileNameLower.StartsWith(queryLower, StringComparison.Ordinal), IsCodeFile(f.FileName), f.FileNameLower.Length),
+                        maxResults);
+                }
             }
 
             // Only now switch to UI thread to get monikers - only for final results
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
 
             // Create results with monikers - only for the limited result set
+            // Use core search text (not modifiers) for highlighting
             var results = new List<SearchResult>(rankedFiles.Count);
             foreach (FileEntry f in rankedFiles)
             {

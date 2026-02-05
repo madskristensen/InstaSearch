@@ -51,6 +51,7 @@
     <Compile Include="Services\FileEntry.cs" />
     <Compile Include="Services\FileIndexer.cs" />
     <Compile Include="Services\SearchHistoryService.cs" />
+    <Compile Include="Services\SearchQuery.cs" />
     <Compile Include="Services\SearchResult.cs" />
     <Compile Include="Services\SearchRootResolver.cs" />
     <Compile Include="Services\SearchService.cs" />
