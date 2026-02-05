@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
@@ -11,7 +10,11 @@ namespace InstaSearch.Services
     /// <summary>
     /// Fast parallel file system indexer with caching, ignore patterns, and live file watching.
     /// </summary>
-    public class FileIndexer : IDisposable
+    /// <remarks>
+    /// Creates a FileIndexer that uses the provided function to get ignored directories.
+    /// </remarks>
+    /// <param name="getIgnoredDirectoriesFunc">Function that returns the set of ignored folder names.</param>
+    public class FileIndexer(Func<HashSet<string>> getIgnoredDirectoriesFunc) : IDisposable
     {
         /// <summary>
         /// Default folders to ignore during file indexing.
@@ -26,24 +29,12 @@ namespace InstaSearch.Services
         private HashSet<string> _ignoredDirectories;
         private readonly object _ignoredDirectoriesLock = new();
 
-        // Optional function to get ignored directories (allows dependency injection for options)
-        private readonly Func<HashSet<string>> _getIgnoredDirectoriesFunc;
-
         // Use IReadOnlyList to prevent mutation after caching
         private readonly ConcurrentDictionary<string, IReadOnlyList<FileEntry>> _cache = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, FileSystemWatcher> _watchers = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, bool> _dirtyFlags = new(StringComparer.OrdinalIgnoreCase);
         private readonly SemaphoreSlim _indexSemaphore = new(1, 1);
         private bool _disposed;
-
-        /// <summary>
-        /// Creates a FileIndexer that uses the provided function to get ignored directories.
-        /// </summary>
-        /// <param name="getIgnoredDirectoriesFunc">Function that returns the set of ignored folder names.</param>
-        public FileIndexer(Func<HashSet<string>> getIgnoredDirectoriesFunc)
-        {
-            _getIgnoredDirectoriesFunc = getIgnoredDirectoriesFunc;
-        }
 
         /// <summary>
         /// Creates a FileIndexer with default ignored directories.
@@ -60,7 +51,7 @@ namespace InstaSearch.Services
             lock (_ignoredDirectoriesLock)
             {
                 // Use the provided function, or fall back to defaults
-                _ignoredDirectories = _getIgnoredDirectoriesFunc?.Invoke() ?? _defaultIgnoredDirectories;
+                _ignoredDirectories = getIgnoredDirectoriesFunc?.Invoke() ?? _defaultIgnoredDirectories;
                 return _ignoredDirectories;
             }
         }
@@ -252,7 +243,7 @@ namespace InstaSearch.Services
                         var segmentLength = i - segmentStart;
                         foreach (var ignored in ignoredDirectories)
                         {
-                            if (ignored.Length == segmentLength && 
+                            if (ignored.Length == segmentLength &&
                                 string.Compare(fullPath, segmentStart, ignored, 0, segmentLength, StringComparison.OrdinalIgnoreCase) == 0)
                             {
                                 return true;
@@ -359,7 +350,7 @@ namespace InstaSearch.Services
             }
 
             // Direct conversion - ConcurrentBag.ToList() is more efficient than dequeue loop
-            return results.ToList();
+            return [.. results];
         }
 
         private static string GetRelativePath(string rootPath, string fullPath)
@@ -376,20 +367,13 @@ namespace InstaSearch.Services
     /// <summary>
     /// Represents an indexed file entry.
     /// </summary>
-    public class FileEntry
+    public class FileEntry(string fileName, string fullPath, string relativePath)
     {
         private string _fileNameLower;
 
-        public FileEntry(string fileName, string fullPath, string relativePath)
-        {
-            FileName = fileName;
-            FullPath = fullPath;
-            RelativePath = relativePath;
-        }
-
-        public string FileName { get; }
-        public string FullPath { get; }
-        public string RelativePath { get; }
+        public string FileName { get; } = fileName;
+        public string FullPath { get; } = fullPath;
+        public string RelativePath { get; } = relativePath;
 
         /// <summary>
         /// Lazy-evaluated lowercase filename to avoid allocations when not needed.

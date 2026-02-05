@@ -250,30 +250,8 @@ namespace InstaSearch.UI
                     e.Handled = true;
                     break;
 
-                case Key.Home:
-                    // Only navigate results when Shift is not pressed (Shift+Home selects text in search box)
-                    if (!shiftHeld && ResultsListBox.Items.Count > 0)
-                    {
-                        _selectionAnchor = 0;
-                        _focusIndex = 0;
-                        ResultsListBox.SelectedIndex = 0;
-                        ResultsListBox.ScrollIntoView(ResultsListBox.Items[0]);
-                        e.Handled = true;
-                    }
-                    break;
-
-                case Key.End:
-                    // Only navigate results when Shift is not pressed (Shift+End selects text in search box)
-                    if (!shiftHeld && ResultsListBox.Items.Count > 0)
-                    {
-                        var lastIndex = ResultsListBox.Items.Count - 1;
-                        _selectionAnchor = lastIndex;
-                        _focusIndex = lastIndex;
-                        ResultsListBox.SelectedIndex = lastIndex;
-                        ResultsListBox.ScrollIntoView(ResultsListBox.Items[lastIndex]);
-                        e.Handled = true;
-                    }
-                    break;
+                // Home and End keys are reserved for text navigation in the search box
+                // and are not used for result list navigation
             }
         }
 
