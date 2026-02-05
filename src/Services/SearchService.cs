@@ -58,17 +58,33 @@ namespace InstaSearch.Services
                 // Check if query contains wildcards
                 var hasWildcard = queryLower.Contains('*');
 
-                // Filter, rank, and take BEFORE getting monikers
-                rankedFiles = [.. files
-                    .Where(f => hasWildcard
-                        ? MatchesWildcard(f.FileNameLower, queryLower)
-                        : f.FileNameLower.IndexOf(queryLower, StringComparison.Ordinal) >= 0)
-                    .Select(f => (File: f, Score: history.GetSelectionCount(f.FullPath), StartsWithQuery: StartsWithPattern(f.FileNameLower, queryLower)))
-                    .OrderByDescending(x => x.Score)
-                    .ThenByDescending(x => x.StartsWithQuery)
-                    .ThenBy(x => x.File.FileName)
-                    .Take(maxResults)
-                    .Select(x => x.File)];
+                if (hasWildcard)
+                {
+                    // Pre-parse wildcard pattern once - avoids allocations during matching
+                    var wildcardPattern = new WildcardPattern(queryLower);
+
+                    // Filter, rank, and take BEFORE getting monikers
+                    rankedFiles = [.. files
+                        .Where(f => wildcardPattern.Matches(f.FileNameLower))
+                        .Select(f => (File: f, Score: history.GetSelectionCount(f.FullPath), StartsWithQuery: wildcardPattern.StartsWithFirstSegment(f.FileNameLower)))
+                        .OrderByDescending(x => x.Score)
+                        .ThenByDescending(x => x.StartsWithQuery)
+                        .ThenBy(x => x.File.FileName)
+                        .Take(maxResults)
+                        .Select(x => x.File)];
+                }
+                else
+                {
+                    // Filter, rank, and take BEFORE getting monikers
+                    rankedFiles = [.. files
+                        .Where(f => f.FileNameLower.IndexOf(queryLower, StringComparison.Ordinal) >= 0)
+                        .Select(f => (File: f, Score: history.GetSelectionCount(f.FullPath), StartsWithQuery: f.FileNameLower.StartsWith(queryLower, StringComparison.Ordinal)))
+                        .OrderByDescending(x => x.Score)
+                        .ThenByDescending(x => x.StartsWithQuery)
+                        .ThenBy(x => x.File.FileName)
+                        .Take(maxResults)
+                        .Select(x => x.File)];
+                }
             }
 
             // Only now switch to UI thread to get monikers - only for final results
@@ -90,57 +106,81 @@ namespace InstaSearch.Services
             return imageService.GetImageMonikerForFile(fileName);
         }
 
-        /// <summary>
-        /// Fast wildcard matching without regex. Splits pattern by '*' and checks segments exist in order.
-        /// Example: "test*.cs" splits to ["test", ".cs"], then verifies both exist in sequence.
-        /// </summary>
-        private static bool MatchesWildcard(string fileName, string pattern)
-        {
-            var segments = pattern.Split(_wildcardSeparator, StringSplitOptions.None);
-            var pos = 0;
-
-            for (var i = 0; i < segments.Length; i++)
-            {
-                var segment = segments[i];
-                if (segment.Length == 0)
-                    continue;
-
-                var index = fileName.IndexOf(segment, pos, StringComparison.Ordinal);
-                if (index < 0)
-                    return false;
-
-                // First segment must match at start if pattern doesn't start with *
-                if (i == 0 && pattern[0] != '*' && index != 0)
-                    return false;
-
-                pos = index + segment.Length;
-            }
-
-            // Last segment must match at end if pattern doesn't end with *
-            if (segments.Length > 0 && pattern[pattern.Length - 1] != '*')
-            {
-                var lastSegment = segments[segments.Length - 1];
-                if (lastSegment.Length > 0 && !fileName.EndsWith(lastSegment, StringComparison.Ordinal))
-                    return false;
-            }
-
-            return true;
-        }
-
         private static readonly char[] _wildcardSeparator = ['*'];
 
         /// <summary>
-        /// Checks if filename starts with the query pattern (for ranking).
+        /// Pre-parsed wildcard pattern that avoids allocations during matching.
+        /// Parse once, match many times.
         /// </summary>
-        private static bool StartsWithPattern(string fileName, string query)
+        private readonly struct WildcardPattern
         {
-            if (query.Contains('*'))
+            public readonly string[] Segments;
+            public readonly bool StartsWithWildcard;
+            public readonly bool EndsWithWildcard;
+            public readonly string FirstSegment;
+
+            public WildcardPattern(string pattern)
             {
-                // For wildcard queries, check if first segment matches at start
-                var starIndex = query.IndexOf('*');
-                return starIndex == 0 || fileName.StartsWith(query.Substring(0, starIndex), StringComparison.Ordinal);
+                Segments = pattern.Split(_wildcardSeparator, StringSplitOptions.None);
+                StartsWithWildcard = pattern.Length > 0 && pattern[0] == '*';
+                EndsWithWildcard = pattern.Length > 0 && pattern[pattern.Length - 1] == '*';
+
+                // Cache first non-empty segment for StartsWith ranking
+                FirstSegment = null;
+                foreach (var seg in Segments)
+                {
+                    if (seg.Length > 0)
+                    {
+                        FirstSegment = seg;
+                        break;
+                    }
+                }
             }
-            return fileName.StartsWith(query, StringComparison.Ordinal);
+
+            /// <summary>
+            /// Matches the pre-parsed pattern against a filename. Zero allocations.
+            /// </summary>
+            public bool Matches(string fileName)
+            {
+                var pos = 0;
+
+                for (var i = 0; i < Segments.Length; i++)
+                {
+                    var segment = Segments[i];
+                    if (segment.Length == 0)
+                        continue;
+
+                    var index = fileName.IndexOf(segment, pos, StringComparison.Ordinal);
+                    if (index < 0)
+                        return false;
+
+                    // First segment must match at start if pattern doesn't start with *
+                    if (i == 0 && !StartsWithWildcard && index != 0)
+                        return false;
+
+                    pos = index + segment.Length;
+                }
+
+                // Last segment must match at end if pattern doesn't end with *
+                if (Segments.Length > 0 && !EndsWithWildcard)
+                {
+                    var lastSegment = Segments[Segments.Length - 1];
+                    if (lastSegment.Length > 0 && !fileName.EndsWith(lastSegment, StringComparison.Ordinal))
+                        return false;
+                }
+
+                return true;
+            }
+
+            /// <summary>
+            /// Checks if filename starts with the first segment (for ranking).
+            /// </summary>
+            public bool StartsWithFirstSegment(string fileName)
+            {
+                if (StartsWithWildcard || FirstSegment == null)
+                    return false;
+                return fileName.StartsWith(FirstSegment, StringComparison.Ordinal);
+            }
         }
 
         /// <summary>

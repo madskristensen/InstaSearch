@@ -15,7 +15,12 @@ namespace InstaSearch.Benchmarks
     {
         private List<string> _fileNames;
         private List<string> _fileNamesLower;
-        private static readonly char[] WildcardSeparator = { '*' };
+        private static readonly char[] WildcardSeparator = ['*'];
+
+        // Pre-parsed patterns for benchmarks
+        private WildcardPattern _patternExtension;
+        private WildcardPattern _patternPrefixAndExtension;
+        private WildcardPattern _patternContains;
 
         [Params(1000, 10000, 50000)]
         public int FileCount { get; set; }
@@ -38,6 +43,11 @@ namespace InstaSearch.Benchmarks
                 _fileNames.Add(fileName);
                 _fileNamesLower.Add(fileName.ToLowerInvariant());
             }
+
+            // Pre-parse patterns once - same approach as optimized SearchService
+            _patternExtension = new WildcardPattern("*.cs");
+            _patternPrefixAndExtension = new WildcardPattern("service*.cs");
+            _patternContains = new WildcardPattern("*test*");
         }
 
         [Benchmark(Description = "Substring search (IndexOf)")]
@@ -56,11 +66,10 @@ namespace InstaSearch.Benchmarks
         [Benchmark(Description = "Wildcard search (*.cs)")]
         public int WildcardSearchExtension()
         {
-            var pattern = "*.cs";
             var count = 0;
             foreach (var fileName in _fileNamesLower)
             {
-                if (MatchesWildcard(fileName, pattern))
+                if (_patternExtension.Matches(fileName))
                     count++;
             }
             return count;
@@ -69,11 +78,10 @@ namespace InstaSearch.Benchmarks
         [Benchmark(Description = "Wildcard search (service*.cs)")]
         public int WildcardSearchPrefixAndExtension()
         {
-            var pattern = "service*.cs";
             var count = 0;
             foreach (var fileName in _fileNamesLower)
             {
-                if (MatchesWildcard(fileName, pattern))
+                if (_patternPrefixAndExtension.Matches(fileName))
                     count++;
             }
             return count;
@@ -82,11 +90,10 @@ namespace InstaSearch.Benchmarks
         [Benchmark(Description = "Wildcard search (*test*)")]
         public int WildcardSearchContains()
         {
-            var pattern = "*test*";
             var count = 0;
             foreach (var fileName in _fileNamesLower)
             {
-                if (MatchesWildcard(fileName, pattern))
+                if (_patternContains.Matches(fileName))
                     count++;
             }
             return count;
@@ -105,40 +112,56 @@ namespace InstaSearch.Benchmarks
         }
 
         /// <summary>
-        /// Fast wildcard matching without regex. Splits pattern by '*' and checks segments exist in order.
-        /// This is the same algorithm used in SearchService.
+        /// Pre-parsed wildcard pattern that avoids allocations during matching.
+        /// Parse once, match many times. Same as SearchService.WildcardPattern.
         /// </summary>
-        private static bool MatchesWildcard(string fileName, string pattern)
+        private readonly struct WildcardPattern
         {
-            var segments = pattern.Split(WildcardSeparator, StringSplitOptions.None);
-            var pos = 0;
+            public readonly string[] Segments;
+            public readonly bool StartsWithWildcard;
+            public readonly bool EndsWithWildcard;
 
-            for (var i = 0; i < segments.Length; i++)
+            public WildcardPattern(string pattern)
             {
-                var segment = segments[i];
-                if (segment.Length == 0)
-                    continue;
-
-                var index = fileName.IndexOf(segment, pos, StringComparison.Ordinal);
-                if (index < 0)
-                    return false;
-
-                // First segment must match at start if pattern doesn't start with *
-                if (i == 0 && pattern[0] != '*' && index != 0)
-                    return false;
-
-                pos = index + segment.Length;
+                Segments = pattern.Split(WildcardSeparator, StringSplitOptions.None);
+                StartsWithWildcard = pattern.Length > 0 && pattern[0] == '*';
+                EndsWithWildcard = pattern.Length > 0 && pattern[pattern.Length - 1] == '*';
             }
 
-            // Last segment must match at end if pattern doesn't end with *
-            if (segments.Length > 0 && pattern[pattern.Length - 1] != '*')
+            /// <summary>
+            /// Matches the pre-parsed pattern against a filename. Zero allocations.
+            /// </summary>
+            public bool Matches(string fileName)
             {
-                var lastSegment = segments[segments.Length - 1];
-                if (lastSegment.Length > 0 && !fileName.EndsWith(lastSegment, StringComparison.Ordinal))
-                    return false;
-            }
+                var pos = 0;
 
-            return true;
+                for (var i = 0; i < Segments.Length; i++)
+                {
+                    var segment = Segments[i];
+                    if (segment.Length == 0)
+                        continue;
+
+                    var index = fileName.IndexOf(segment, pos, StringComparison.Ordinal);
+                    if (index < 0)
+                        return false;
+
+                    // First segment must match at start if pattern doesn't start with *
+                    if (i == 0 && !StartsWithWildcard && index != 0)
+                        return false;
+
+                    pos = index + segment.Length;
+                }
+
+                // Last segment must match at end if pattern doesn't end with *
+                if (Segments.Length > 0 && !EndsWithWildcard)
+                {
+                    var lastSegment = Segments[Segments.Length - 1];
+                    if (lastSegment.Length > 0 && !fileName.EndsWith(lastSegment, StringComparison.Ordinal))
+                        return false;
+                }
+
+                return true;
+            }
         }
     }
 }
