@@ -29,13 +29,13 @@ namespace InstaSearch.Benchmarks
             var dirCount = FileCount / 10; // ~10 files per directory
             if (dirCount < 1) dirCount = 1;
 
-            for (int d = 0; d < dirCount; d++)
+            for (var d = 0; d < dirCount; d++)
             {
                 var subDir = Path.Combine(TestRootPath, $"Dir{d:D4}");
                 Directory.CreateDirectory(subDir);
 
                 var filesInDir = FileCount / dirCount;
-                for (int f = 0; f < filesInDir; f++)
+                for (var f = 0; f < filesInDir; f++)
                 {
                     var ext = extensions[(d + f) % extensions.Length];
                     var filePath = Path.Combine(subDir, $"File{f:D4}{ext}");
@@ -82,7 +82,7 @@ namespace InstaSearch.Benchmarks
         [Benchmark(Description = "Index directory (cold)")]
         public async Task<int> IndexDirectoryCold()
         {
-            var files = await Indexer.IndexAsync(TestRootPath, CancellationToken.None);
+            IReadOnlyList<FileEntry> files = await Indexer.IndexAsync(TestRootPath, CancellationToken.None);
             return files.Count;
         }
     }
@@ -107,7 +107,7 @@ namespace InstaSearch.Benchmarks
         public async Task<int> IndexDirectoryCached()
         {
             // This call should hit the cache - measuring cache lookup performance
-            var files = await Indexer.IndexAsync(TestRootPath, CancellationToken.None);
+            IReadOnlyList<FileEntry> files = await Indexer.IndexAsync(TestRootPath, CancellationToken.None);
             return files.Count;
         }
     }

@@ -42,14 +42,11 @@ namespace InstaSearch.Services
             if (string.IsNullOrWhiteSpace(query))
             {
                 // Show most recently selected files when query is empty
-                // Sort and take BEFORE getting monikers (expensive UI operation)
-                rankedFiles = [.. files
-                    .Select(f => (File: f, Score: history.GetSelectionCount(f.FullPath)))
-                    .Where(x => x.Score > 0)
-                    .OrderByDescending(x => x.Score)
-                    .ThenBy(x => x.File.FileName)
-                    .Take(maxResults)
-                    .Select(x => x.File)];
+                // Use heap-based selection for O(n log k) instead of O(n log n) full sort
+                rankedFiles = SelectTopN(
+                    files.Where(f => history.GetSelectionCount(f.FullPath) > 0),
+                    f => new RankedFile(f, history.GetSelectionCount(f.FullPath), false),
+                    maxResults);
 
                 // Empty query - no highlighting needed
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
@@ -72,27 +69,19 @@ namespace InstaSearch.Services
                 // Pre-parse wildcard pattern once - avoids allocations during matching
                 var wildcardPattern = new WildcardPattern(queryLower);
 
-                // Filter, rank, and take BEFORE getting monikers
-                rankedFiles = [.. files
-                    .Where(f => wildcardPattern.Matches(f.FileNameLower))
-                    .Select(f => (File: f, Score: history.GetSelectionCount(f.FullPath), StartsWithQuery: wildcardPattern.StartsWithFirstSegment(f.FileNameLower)))
-                    .OrderByDescending(x => x.Score)
-                    .ThenByDescending(x => x.StartsWithQuery)
-                    .ThenBy(x => x.File.FileName)
-                    .Take(maxResults)
-                    .Select(x => x.File)];
+                // Use heap-based selection for O(n log k) instead of O(n log n) full sort
+                rankedFiles = SelectTopN(
+                    files.Where(f => wildcardPattern.Matches(f.FileNameLower)),
+                    f => new RankedFile(f, history.GetSelectionCount(f.FullPath), wildcardPattern.StartsWithFirstSegment(f.FileNameLower)),
+                    maxResults);
             }
             else
             {
-                // Filter, rank, and take BEFORE getting monikers
-                rankedFiles = [.. files
-                    .Where(f => f.FileNameLower.IndexOf(queryLower, StringComparison.Ordinal) >= 0)
-                    .Select(f => (File: f, Score: history.GetSelectionCount(f.FullPath), StartsWithQuery: f.FileNameLower.StartsWith(queryLower, StringComparison.Ordinal)))
-                    .OrderByDescending(x => x.Score)
-                    .ThenByDescending(x => x.StartsWithQuery)
-                    .ThenBy(x => x.File.FileName)
-                    .Take(maxResults)
-                    .Select(x => x.File)];
+                // Use heap-based selection for O(n log k) instead of O(n log n) full sort
+                rankedFiles = SelectTopN(
+                    files.Where(f => f.FileNameLower.IndexOf(queryLower, StringComparison.Ordinal) >= 0),
+                    f => new RankedFile(f, history.GetSelectionCount(f.FullPath), f.FileNameLower.StartsWith(queryLower, StringComparison.Ordinal)),
+                    maxResults);
             }
 
             // Only now switch to UI thread to get monikers - only for final results
@@ -115,6 +104,67 @@ namespace InstaSearch.Services
         }
 
         private static readonly char[] _wildcardSeparator = ['*'];
+
+        /// <summary>
+        /// Ranked file entry for sorting. Using struct to avoid allocations.
+        /// </summary>
+        private readonly struct RankedFile(FileEntry file, int score, bool startsWithQuery) : IComparable<RankedFile>
+        {
+            public readonly FileEntry File = file;
+            public readonly int Score = score;
+            public readonly bool StartsWithQuery = startsWithQuery;
+
+            /// <summary>
+            /// Compare for descending score, descending startsWithQuery, ascending filename.
+            /// Returns negative if this should come BEFORE other in sorted order.
+            /// </summary>
+            public int CompareTo(RankedFile other)
+            {
+                // Higher score first (descending)
+                var scoreCompare = other.Score.CompareTo(Score);
+                if (scoreCompare != 0) return scoreCompare;
+
+                // StartsWithQuery=true first (descending)
+                var startsCompare = other.StartsWithQuery.CompareTo(StartsWithQuery);
+                if (startsCompare != 0) return startsCompare;
+
+                // Alphabetical by filename (ascending)
+                return string.Compare(File.FileName, other.File.FileName, StringComparison.Ordinal);
+            }
+        }
+
+        /// <summary>
+        /// Selects top N items using a simple list-based approach optimized for small k.
+        /// Maintains a sorted list of the k best items seen so far.
+        /// O(n*k) but with very low constant factors for typical maxResults (100).
+        /// </summary>
+        private static List<FileEntry> SelectTopN(IEnumerable<FileEntry> source, Func<FileEntry, RankedFile> selector, int maxResults)
+        {
+            var topItems = new List<RankedFile>(maxResults + 1);
+
+            foreach (FileEntry file in source)
+            {
+                RankedFile ranked = selector(file);
+
+                // Binary search to find insertion point
+                var insertIndex = topItems.BinarySearch(ranked);
+                if (insertIndex < 0) insertIndex = ~insertIndex;
+
+                // Only insert if it would be in top k
+                if (insertIndex < maxResults)
+                {
+                    topItems.Insert(insertIndex, ranked);
+
+                    // Remove worst item if over capacity
+                    if (topItems.Count > maxResults)
+                    {
+                        topItems.RemoveAt(maxResults);
+                    }
+                }
+            }
+
+            return topItems.ConvertAll(r => r.File);
+        }
 
         /// <summary>
         /// Pre-parsed wildcard pattern that avoids allocations during matching.

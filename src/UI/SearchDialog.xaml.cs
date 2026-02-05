@@ -170,7 +170,7 @@ namespace InstaSearch.UI
                 StatusText.Text = "Searching...";
 
                 // Parse line number from query (e.g., "file.cs:42")
-                (string searchQuery, int? lineNumber) = ParseQueryWithLineNumber(query);
+                (var searchQuery, var lineNumber) = ParseQueryWithLineNumber(query);
                 _selectedLineNumber = lineNumber;
 
                 IReadOnlyList<SearchResult> results = await _searchService.SearchAsync(_rootPath, searchQuery, _imageService, 100, token);

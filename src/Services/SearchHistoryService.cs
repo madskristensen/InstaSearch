@@ -1,7 +1,7 @@
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Threading.Tasks;
 
 namespace InstaSearch.Services
 {
@@ -11,20 +11,20 @@ namespace InstaSearch.Services
     /// </summary>
     public class SearchHistoryService
     {
-        private const int MaxHistoryEntries = 500;
-        private const string HistoryFileName = "InstaSearch.history.txt";
-        private const string VsFolderName = ".vs";
-        private const string InstaSearchFolderName = "InstaSearch";
+        private const int _maxHistoryEntries = 500;
+        private const string _historyFileName = "InstaSearch.history.txt";
+        private const string _vsFolderName = ".vs";
+        private const string _instaSearchFolderName = "InstaSearch";
 
         private string _historyFilePath;
         private string _currentRootPath;
-        private readonly Dictionary<string, int> _selectionCounts;
-        private readonly object _lock = new();
-        private bool _isDirty;
+        private readonly ConcurrentDictionary<string, int> _selectionCounts;
+        private readonly object _workspaceLoadLock = new();
+        private volatile bool _isDirty;
 
         public SearchHistoryService()
         {
-            _selectionCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            _selectionCounts = new ConcurrentDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         }
 
         /// <summary>
@@ -35,14 +35,14 @@ namespace InstaSearch.Services
             if (string.IsNullOrEmpty(rootPath) || rootPath == _currentRootPath)
                 return;
 
-            lock (_lock)
+            lock (_workspaceLoadLock)
             {
                 _currentRootPath = rootPath;
 
                 // Create .vs/InstaSearch folder
-                var vsFolder = Path.Combine(rootPath, VsFolderName, InstaSearchFolderName);
+                var vsFolder = Path.Combine(rootPath, _vsFolderName, _instaSearchFolderName);
                 Directory.CreateDirectory(vsFolder);
-                _historyFilePath = Path.Combine(vsFolder, HistoryFileName);
+                _historyFilePath = Path.Combine(vsFolder, _historyFileName);
 
                 // Clear and reload history for this workspace
                 _selectionCounts.Clear();
@@ -59,22 +59,19 @@ namespace InstaSearch.Services
             if (string.IsNullOrEmpty(fullPath) || string.IsNullOrEmpty(_historyFilePath))
                 return;
 
-            lock (_lock)
-            {
-                if (_selectionCounts.TryGetValue(fullPath, out var count))
-                {
-                    _selectionCounts[fullPath] = count + 1;
-                }
-                else
-                {
-                    _selectionCounts[fullPath] = 1;
-                }
-                _isDirty = true;
+            // Lock-free atomic increment using ConcurrentDictionary
+            _selectionCounts.AddOrUpdate(fullPath, 1, (_, count) => count + 1);
+            _isDirty = true;
 
-                // Trim if too large
-                if (_selectionCounts.Count > MaxHistoryEntries)
+            // Trim if too large (rare operation, ok to check without lock)
+            if (_selectionCounts.Count > _maxHistoryEntries)
+            {
+                lock (_workspaceLoadLock)
                 {
-                    TrimHistory();
+                    if (_selectionCounts.Count > _maxHistoryEntries)
+                    {
+                        TrimHistory();
+                    }
                 }
             }
         }
@@ -87,10 +84,8 @@ namespace InstaSearch.Services
             if (string.IsNullOrEmpty(fullPath))
                 return 0;
 
-            lock (_lock)
-            {
-                return _selectionCounts.TryGetValue(fullPath, out var count) ? count : 0;
-            }
+            // Lock-free read - ConcurrentDictionary.TryGetValue is thread-safe
+            return _selectionCounts.TryGetValue(fullPath, out var count) ? count : 0;
         }
 
         /// <summary>
@@ -98,18 +93,13 @@ namespace InstaSearch.Services
         /// </summary>
         public async Task SaveAsync()
         {
-            List<KeyValuePair<string, int>> toSave;
-            string filePath;
+            if (!_isDirty || string.IsNullOrEmpty(_historyFilePath))
+                return;
 
-            lock (_lock)
-            {
-                if (!_isDirty || string.IsNullOrEmpty(_historyFilePath))
-                    return;
-
-                toSave = _selectionCounts.ToList();
-                filePath = _historyFilePath;
-                _isDirty = false;
-            }
+            // Snapshot current state - ConcurrentDictionary.ToList is thread-safe
+            var toSave = _selectionCounts.ToList();
+            var filePath = _historyFilePath;
+            _isDirty = false;
 
             await Task.Run(() =>
             {
@@ -158,7 +148,7 @@ namespace InstaSearch.Services
             // Keep only the most frequently selected entries
             var toKeep = _selectionCounts
                 .OrderByDescending(kvp => kvp.Value)
-                .Take(MaxHistoryEntries / 2)
+                .Take(_maxHistoryEntries / 2)
                 .ToDictionary(kvp => kvp.Key, kvp => kvp.Value, StringComparer.OrdinalIgnoreCase);
 
             _selectionCounts.Clear();

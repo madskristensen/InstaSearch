@@ -35,7 +35,7 @@ namespace InstaSearch.Benchmarks
             _fileNames = new List<string>(FileCount);
             _fileNamesLower = new List<string>(FileCount);
 
-            for (int i = 0; i < FileCount; i++)
+            for (var i = 0; i < FileCount; i++)
             {
                 var prefix = prefixes[random.Next(prefixes.Length)];
                 var ext = extensions[random.Next(extensions.Length)];
