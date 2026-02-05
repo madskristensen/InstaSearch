@@ -50,41 +50,49 @@ namespace InstaSearch.Services
                     .ThenBy(x => x.File.FileName)
                     .Take(maxResults)
                     .Select(x => x.File)];
+
+                // Empty query - no highlighting needed
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+
+                var historyResults = new List<SearchResult>(rankedFiles.Count);
+                foreach (FileEntry f in rankedFiles)
+                {
+                    historyResults.Add(new SearchResult(f, history.GetSelectionCount(f.FullPath), GetMoniker(imageService, f.FileName), string.Empty));
+                }
+                return historyResults;
+            }
+
+            var queryLower = query.ToLowerInvariant();
+
+            // Check if query contains wildcards
+            var hasWildcard = queryLower.Contains('*');
+
+            if (hasWildcard)
+            {
+                // Pre-parse wildcard pattern once - avoids allocations during matching
+                var wildcardPattern = new WildcardPattern(queryLower);
+
+                // Filter, rank, and take BEFORE getting monikers
+                rankedFiles = [.. files
+                    .Where(f => wildcardPattern.Matches(f.FileNameLower))
+                    .Select(f => (File: f, Score: history.GetSelectionCount(f.FullPath), StartsWithQuery: wildcardPattern.StartsWithFirstSegment(f.FileNameLower)))
+                    .OrderByDescending(x => x.Score)
+                    .ThenByDescending(x => x.StartsWithQuery)
+                    .ThenBy(x => x.File.FileName)
+                    .Take(maxResults)
+                    .Select(x => x.File)];
             }
             else
             {
-                var queryLower = query.ToLowerInvariant();
-
-                // Check if query contains wildcards
-                var hasWildcard = queryLower.Contains('*');
-
-                if (hasWildcard)
-                {
-                    // Pre-parse wildcard pattern once - avoids allocations during matching
-                    var wildcardPattern = new WildcardPattern(queryLower);
-
-                    // Filter, rank, and take BEFORE getting monikers
-                    rankedFiles = [.. files
-                        .Where(f => wildcardPattern.Matches(f.FileNameLower))
-                        .Select(f => (File: f, Score: history.GetSelectionCount(f.FullPath), StartsWithQuery: wildcardPattern.StartsWithFirstSegment(f.FileNameLower)))
-                        .OrderByDescending(x => x.Score)
-                        .ThenByDescending(x => x.StartsWithQuery)
-                        .ThenBy(x => x.File.FileName)
-                        .Take(maxResults)
-                        .Select(x => x.File)];
-                }
-                else
-                {
-                    // Filter, rank, and take BEFORE getting monikers
-                    rankedFiles = [.. files
-                        .Where(f => f.FileNameLower.IndexOf(queryLower, StringComparison.Ordinal) >= 0)
-                        .Select(f => (File: f, Score: history.GetSelectionCount(f.FullPath), StartsWithQuery: f.FileNameLower.StartsWith(queryLower, StringComparison.Ordinal)))
-                        .OrderByDescending(x => x.Score)
-                        .ThenByDescending(x => x.StartsWithQuery)
-                        .ThenBy(x => x.File.FileName)
-                        .Take(maxResults)
-                        .Select(x => x.File)];
-                }
+                // Filter, rank, and take BEFORE getting monikers
+                rankedFiles = [.. files
+                    .Where(f => f.FileNameLower.IndexOf(queryLower, StringComparison.Ordinal) >= 0)
+                    .Select(f => (File: f, Score: history.GetSelectionCount(f.FullPath), StartsWithQuery: f.FileNameLower.StartsWith(queryLower, StringComparison.Ordinal)))
+                    .OrderByDescending(x => x.Score)
+                    .ThenByDescending(x => x.StartsWithQuery)
+                    .ThenBy(x => x.File.FileName)
+                    .Take(maxResults)
+                    .Select(x => x.File)];
             }
 
             // Only now switch to UI thread to get monikers - only for final results
@@ -94,7 +102,7 @@ namespace InstaSearch.Services
             var results = new List<SearchResult>(rankedFiles.Count);
             foreach (FileEntry f in rankedFiles)
             {
-                results.Add(new SearchResult(f, history.GetSelectionCount(f.FullPath), GetMoniker(imageService, f.FileName), query));
+                results.Add(new SearchResult(f, history.GetSelectionCount(f.FullPath), GetMoniker(imageService, f.FileName), queryLower));
             }
 
             return results;
@@ -204,7 +212,7 @@ namespace InstaSearch.Services
     /// <summary>
     /// Represents a search result with ranking information.
     /// </summary>
-    public class SearchResult(FileEntry file, int historyScore, ImageMoniker moniker, string query)
+    public class SearchResult(FileEntry file, int historyScore, ImageMoniker moniker, string queryLower)
     {
         public string FileName { get; } = file.FileName;
         public string FullPath { get; } = file.FullPath;
@@ -212,6 +220,10 @@ namespace InstaSearch.Services
         public string FileNameLower { get; } = file.FileNameLower;
         public int HistoryScore { get; } = historyScore;
         public ImageMoniker Moniker { get; } = moniker;
-        public string Query { get; } = query ?? string.Empty;
+
+        /// <summary>
+        /// The search query (pre-lowercased for efficient highlighting).
+        /// </summary>
+        public string QueryLower { get; } = queryLower ?? string.Empty;
     }
 }

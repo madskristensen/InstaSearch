@@ -11,7 +11,11 @@
         WindowStyle="None"
         AllowsTransparency="True"
         ShowInTaskbar="False"
-        ResizeMode="NoResize"
+        ResizeMode="CanResizeWithGrip"
+        MinWidth="400"
+        MinHeight="250"
+        MaxWidth="1200"
+        MaxHeight="800"
         Width="600"
         Height="400"
         Background="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowBackgroundBrushKey}}"
@@ -67,7 +71,8 @@
 
     <Border BorderBrush="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowBorderBrushKey}}"
             BorderThickness="1"
-            CornerRadius="4">
+            CornerRadius="4"
+            ClipToBounds="True">
         <Grid Margin="0">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -80,6 +85,7 @@
                     Background="{DynamicResource {x:Static vs:EnvironmentColors.SearchBoxBackgroundBrushKey}}"
                     BorderBrush="{DynamicResource {x:Static vs:EnvironmentColors.SearchBoxBorderBrushKey}}"
                     BorderThickness="0,0,0,1"
+                    CornerRadius="3,3,0,0"
                     Padding="8">
                 <Grid>
                     <Grid.ColumnDefinitions>
@@ -143,7 +149,8 @@
                             <!-- File Name and Path -->
                             <StackPanel Grid.Column="1" Orientation="Vertical">
                                 <local:HighlightTextBlock SourceText="{Binding FileName, Mode=OneTime}"
-                                                          HighlightText="{Binding Query, Mode=OneTime}"
+                                                          SourceTextLower="{Binding FileNameLower, Mode=OneTime}"
+                                                          HighlightText="{Binding QueryLower, Mode=OneTime}"
                                                           FontSize="13"
                                                           Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"/>
                                 <TextBlock Text="{Binding RelativePath, Mode=OneTime}" 
@@ -162,6 +169,7 @@
                     Background="{DynamicResource {x:Static vs:EnvironmentColors.CommandBarGradientBrushKey}}"
                     BorderBrush="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowBorderBrushKey}}"
                     BorderThickness="0,1,0,0"
+                    CornerRadius="0,0,3,3"
                     Padding="8,4">
                 <Grid>
                     <Grid.ColumnDefinitions>
@@ -193,7 +201,7 @@
                                VerticalAlignment="Center"
                                Opacity="0.7"
                                Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"
-                               Text="↑↓ Navigate • Enter Open • Ctrl+Enter Keep Open • Esc Close"/>
+                               Text="Enter Open • Ctrl+Enter Keep Open • Esc Close"/>
                 </Grid>
             </Border>
         </Grid>

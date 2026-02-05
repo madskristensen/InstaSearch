@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
@@ -25,6 +24,13 @@ namespace InstaSearch.UI
                 typeof(HighlightTextBlock),
                 new PropertyMetadata(string.Empty, OnHighlightChanged));
 
+        public static readonly DependencyProperty SourceTextLowerProperty =
+            DependencyProperty.Register(
+                nameof(SourceTextLower),
+                typeof(string),
+                typeof(HighlightTextBlock),
+                new PropertyMetadata(string.Empty, OnHighlightChanged));
+
         public static readonly DependencyProperty HighlightBrushProperty =
             DependencyProperty.Register(
                 nameof(HighlightBrush),
@@ -33,7 +39,7 @@ namespace InstaSearch.UI
                 new PropertyMetadata(new SolidColorBrush(Color.FromArgb(80, 255, 200, 0)), OnHighlightChanged));
 
         /// <summary>
-        /// The text to highlight (search query).
+        /// The text to highlight (search query, should be pre-lowercased).
         /// </summary>
         public string HighlightText
         {
@@ -48,6 +54,15 @@ namespace InstaSearch.UI
         {
             get => (string)GetValue(SourceTextProperty);
             set => SetValue(SourceTextProperty, value);
+        }
+
+        /// <summary>
+        /// The pre-lowercased source text for matching (avoids allocation).
+        /// </summary>
+        public string SourceTextLower
+        {
+            get => (string)GetValue(SourceTextLowerProperty);
+            set => SetValue(SourceTextLowerProperty, value);
         }
 
         /// <summary>
@@ -85,41 +100,55 @@ namespace InstaSearch.UI
                 return;
             }
 
+            // Use pre-lowercased source if available and valid, otherwise lowercase now
+            var sourceLower = SourceTextLower;
+            if (string.IsNullOrEmpty(sourceLower) || sourceLower.Length != source.Length)
+            {
+                sourceLower = source.ToLowerInvariant();
+            }
+
             // Handle wildcard patterns
             if (highlight.Contains("*"))
             {
-                HighlightWildcard(source, highlight);
+                HighlightWildcard(source, sourceLower, highlight);
             }
             else
             {
-                HighlightSubstring(source, highlight);
+                HighlightSubstring(source, sourceLower, highlight);
             }
         }
 
-        private void HighlightSubstring(string source, string highlight)
+        private void HighlightSubstring(string source, string sourceLower, string highlightLower)
         {
-            var sourceLower = source.ToLowerInvariant();
-            var highlightLower = highlight.ToLowerInvariant();
-
             var lastIndex = 0;
             var index = sourceLower.IndexOf(highlightLower, StringComparison.Ordinal);
 
             while (index >= 0)
             {
                 // Add text before match
-                if (index > lastIndex)
+                if (index > lastIndex && index <= source.Length)
                 {
-                    Inlines.Add(new Run(source.Substring(lastIndex, index - lastIndex)));
+                    var length = Math.Min(index - lastIndex, source.Length - lastIndex);
+                    if (length > 0)
+                    {
+                        Inlines.Add(new Run(source.Substring(lastIndex, length)));
+                    }
                 }
 
-                // Add highlighted match
-                Inlines.Add(new Run(source.Substring(index, highlight.Length))
+                // Add highlighted match (with bounds check)
+                var matchLength = Math.Min(highlightLower.Length, source.Length - index);
+                if (index < source.Length && matchLength > 0)
                 {
-                    Background = HighlightBrush,
-                    FontWeight = FontWeights.SemiBold
-                });
+                    Inlines.Add(new Run(source.Substring(index, matchLength))
+                    {
+                        Background = HighlightBrush,
+                        FontWeight = FontWeights.SemiBold
+                    });
+                }
 
-                lastIndex = index + highlight.Length;
+                lastIndex = index + highlightLower.Length;
+                if (lastIndex >= sourceLower.Length)
+                    break;
                 index = sourceLower.IndexOf(highlightLower, lastIndex, StringComparison.Ordinal);
             }
 
@@ -130,10 +159,11 @@ namespace InstaSearch.UI
             }
         }
 
-        private void HighlightWildcard(string source, string pattern)
+        private static readonly char[] _wildcardSeparator = ['*'];
+
+        private void HighlightWildcard(string source, string sourceLower, string pattern)
         {
-            var segments = pattern.Split(new[] { '*' }, StringSplitOptions.RemoveEmptyEntries);
-            var sourceLower = source.ToLowerInvariant();
+            var segments = pattern.Split(_wildcardSeparator, StringSplitOptions.RemoveEmptyEntries);
 
             if (segments.Length == 0)
             {
@@ -141,40 +171,43 @@ namespace InstaSearch.UI
                 return;
             }
 
-            // Find all segment matches and their positions
-            var matches = new List<(int Start, int Length)>();
+            // Find matches and build output in single pass (avoid List allocation for small segment counts)
+            var lastIndex = 0;
             var searchStart = 0;
 
             foreach (var segment in segments)
             {
-                var segmentLower = segment.ToLowerInvariant();
-                var index = sourceLower.IndexOf(segmentLower, searchStart, StringComparison.Ordinal);
+                if (searchStart >= sourceLower.Length)
+                    break;
 
-                if (index >= 0)
+                var index = sourceLower.IndexOf(segment, searchStart, StringComparison.Ordinal);
+
+                if (index >= 0 && index < source.Length)
                 {
-                    matches.Add((index, segment.Length));
-                    searchStart = index + segment.Length;
+                    // Add text before match (with bounds check)
+                    if (index > lastIndex)
+                    {
+                        var length = Math.Min(index - lastIndex, source.Length - lastIndex);
+                        if (length > 0)
+                        {
+                            Inlines.Add(new Run(source.Substring(lastIndex, length)));
+                        }
+                    }
+
+                    // Add highlighted match (with bounds check)
+                    var matchLength = Math.Min(segment.Length, source.Length - index);
+                    if (matchLength > 0)
+                    {
+                        Inlines.Add(new Run(source.Substring(index, matchLength))
+                        {
+                            Background = HighlightBrush,
+                            FontWeight = FontWeights.SemiBold
+                        });
+                    }
+
+                    lastIndex = index + segment.Length;
+                    searchStart = lastIndex;
                 }
-            }
-
-            // Build the highlighted text
-            var lastIndex = 0;
-            foreach (var (start, length) in matches)
-            {
-                // Add text before match
-                if (start > lastIndex)
-                {
-                    Inlines.Add(new Run(source.Substring(lastIndex, start - lastIndex)));
-                }
-
-                // Add highlighted match
-                Inlines.Add(new Run(source.Substring(start, length))
-                {
-                    Background = HighlightBrush,
-                    FontWeight = FontWeights.SemiBold
-                });
-
-                lastIndex = start + length;
             }
 
             // Add remaining text

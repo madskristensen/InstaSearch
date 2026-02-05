@@ -3,6 +3,7 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
+using InstaSearch.Options;
 using InstaSearch.Services;
 using Microsoft.VisualStudio.Shell.Interop;
 using SelectionChangedEventArgs = System.Windows.Controls.SelectionChangedEventArgs;
@@ -33,6 +34,11 @@ namespace InstaSearch.UI
             _searchService = searchService;
             _imageService = imageService;
             _rootPath = rootPath;
+
+            // Restore saved window size
+            General settings = General.Instance;
+            Width = settings.GetDialogWidth();
+            Height = settings.GetDialogHeight();
 
             _debounceTimer = new DispatcherTimer
             {
@@ -233,6 +239,13 @@ namespace InstaSearch.UI
             _debounceTimer.Stop();
             _searchCts?.Cancel();
             _searchCts?.Dispose();
+
+            // Save window size for next time
+            General settings = General.Instance;
+            settings.DialogWidth = Width;
+            settings.DialogHeight = Height;
+            settings.Save();
+
             base.OnClosed(e);
         }
     }
