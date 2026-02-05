@@ -48,10 +48,14 @@
     <Compile Include="Commands\GoToIntercepter.cs" />
     <Compile Include="Options\General.cs" />
     <Compile Include="Options\OptionsProvider.cs" />
+    <Compile Include="Services\FileEntry.cs" />
     <Compile Include="Services\FileIndexer.cs" />
     <Compile Include="Services\SearchHistoryService.cs" />
+    <Compile Include="Services\SearchResult.cs" />
     <Compile Include="Services\SearchRootResolver.cs" />
     <Compile Include="Services\SearchService.cs" />
+    <Compile Include="Services\WildcardPattern.cs" />
+    <Compile Include="UI\FilesSelectedEventArgs.cs" />
     <Compile Include="UI\HighlightTextBlock.cs" />
     <Compile Include="UI\SearchDialog.xaml.cs">
       <DependentUpon>SearchDialog.xaml</DependentUpon>

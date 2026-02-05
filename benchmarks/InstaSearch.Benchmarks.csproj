@@ -15,6 +15,7 @@
 
   <!-- Reference source files directly to avoid VS SDK dependencies -->
   <ItemGroup>
+    <Compile Include="..\src\Services\FileEntry.cs" Link="Services\FileEntry.cs" />
     <Compile Include="..\src\Services\FileIndexer.cs" Link="Services\FileIndexer.cs" />
   </ItemGroup>
 </Project>

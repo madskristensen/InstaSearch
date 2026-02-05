@@ -14,15 +14,6 @@ using TextChangedEventArgs = System.Windows.Controls.TextChangedEventArgs;
 namespace InstaSearch.UI
 {
     /// <summary>
-    /// Event args for when files are selected in the search dialog.
-    /// </summary>
-    public class FilesSelectedEventArgs(IReadOnlyList<SearchResult> selectedFiles, int? lineNumber) : EventArgs
-    {
-        public IReadOnlyList<SearchResult> SelectedFiles { get; } = selectedFiles;
-        public int? LineNumber { get; } = lineNumber;
-    }
-
-    /// <summary>
     /// Fast file search dialog with real-time results.
     /// </summary>
     public partial class SearchDialog : Window
