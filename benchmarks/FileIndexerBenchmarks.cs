@@ -7,14 +7,12 @@ using InstaSearch.Services;
 namespace InstaSearch.Benchmarks
 {
     /// <summary>
-    /// Benchmarks for FileIndexer performance across different directory sizes.
+    /// Base class for FileIndexer benchmarks with shared setup/cleanup logic.
     /// </summary>
-    [MemoryDiagnoser]
-    [SimpleJob(launchCount: 1, warmupCount: 3, iterationCount: 5)]
-    public class FileIndexerBenchmarks
+    public abstract class FileIndexerBenchmarkBase
     {
-        private string _testRootPath;
-        private FileIndexer _indexer;
+        protected string TestRootPath;
+        protected FileIndexer Indexer;
 
         [Params(100, 1000, 5000)]
         public int FileCount { get; set; }
@@ -23,8 +21,8 @@ namespace InstaSearch.Benchmarks
         public void Setup()
         {
             // Create a temporary test directory with files
-            _testRootPath = Path.Combine(Path.GetTempPath(), "InstaSearchBenchmark_" + Path.GetRandomFileName());
-            Directory.CreateDirectory(_testRootPath);
+            TestRootPath = Path.Combine(Path.GetTempPath(), "InstaSearchBenchmark_" + Path.GetRandomFileName());
+            Directory.CreateDirectory(TestRootPath);
 
             // Create nested directory structure with files
             var extensions = new[] { ".cs", ".xaml", ".json", ".txt", ".xml", ".config" };
@@ -33,7 +31,7 @@ namespace InstaSearch.Benchmarks
 
             for (int d = 0; d < dirCount; d++)
             {
-                var subDir = Path.Combine(_testRootPath, $"Dir{d:D4}");
+                var subDir = Path.Combine(TestRootPath, $"Dir{d:D4}");
                 Directory.CreateDirectory(subDir);
 
                 var filesInDir = FileCount / dirCount;
@@ -45,19 +43,19 @@ namespace InstaSearch.Benchmarks
                 }
             }
 
-            _indexer = new FileIndexer();
+            Indexer = new FileIndexer();
         }
 
         [GlobalCleanup]
         public void Cleanup()
         {
-            _indexer?.Dispose();
+            Indexer?.Dispose();
 
-            if (Directory.Exists(_testRootPath))
+            if (Directory.Exists(TestRootPath))
             {
                 try
                 {
-                    Directory.Delete(_testRootPath, recursive: true);
+                    Directory.Delete(TestRootPath, recursive: true);
                 }
                 catch
                 {
@@ -65,28 +63,51 @@ namespace InstaSearch.Benchmarks
                 }
             }
         }
+    }
 
+    /// <summary>
+    /// Benchmarks for cold (uncached) FileIndexer performance.
+    /// </summary>
+    [MemoryDiagnoser]
+    [SimpleJob(launchCount: 1, warmupCount: 3, iterationCount: 5)]
+    public class FileIndexerBenchmarks : FileIndexerBenchmarkBase
+    {
         [IterationSetup]
         public void IterationSetup()
         {
             // Invalidate cache before each iteration to measure cold indexing
-            _indexer.InvalidateCache(_testRootPath);
+            Indexer.InvalidateCache(TestRootPath);
         }
 
         [Benchmark(Description = "Index directory (cold)")]
         public async Task<int> IndexDirectoryCold()
         {
-            var files = await _indexer.IndexAsync(_testRootPath, CancellationToken.None);
+            var files = await Indexer.IndexAsync(TestRootPath, CancellationToken.None);
             return files.Count;
+        }
+    }
+
+    /// <summary>
+    /// Benchmarks for cached FileIndexer performance.
+    /// Cache is populated once per parameter combination in GlobalSetup.
+    /// </summary>
+    [MemoryDiagnoser]
+    [SimpleJob(launchCount: 1, warmupCount: 3, iterationCount: 10)]
+    public class FileIndexerCachedBenchmarks : FileIndexerBenchmarkBase
+    {
+        [IterationSetup]
+        public void IterationSetup()
+        {
+            // Pre-populate cache before measuring cache hit performance
+            // This runs before each iteration to ensure cache is warm
+            Indexer.IndexAsync(TestRootPath, CancellationToken.None).GetAwaiter().GetResult();
         }
 
         [Benchmark(Description = "Index directory (cached)")]
         public async Task<int> IndexDirectoryCached()
         {
-            // First call populates cache
-            await _indexer.IndexAsync(_testRootPath, CancellationToken.None);
-            // Second call hits cache
-            var files = await _indexer.IndexAsync(_testRootPath, CancellationToken.None);
+            // This call should hit the cache - measuring cache lookup performance
+            var files = await Indexer.IndexAsync(TestRootPath, CancellationToken.None);
             return files.Count;
         }
     }

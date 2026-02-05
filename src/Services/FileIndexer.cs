@@ -34,7 +34,7 @@ namespace InstaSearch.Services
         private readonly ConcurrentDictionary<string, IReadOnlyList<FileEntry>> _cache = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, FileSystemWatcher> _watchers = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, bool> _dirtyFlags = new(StringComparer.OrdinalIgnoreCase);
-        private readonly object _indexLock = new();
+        private readonly SemaphoreSlim _indexSemaphore = new(1, 1);
         private bool _disposed;
 
         /// <summary>
@@ -56,9 +56,10 @@ namespace InstaSearch.Services
                 return cached;
             }
 
-            // Slow path: need to re-index (with lock to prevent concurrent re-indexing of same root)
-            IReadOnlyList<FileEntry> files;
-            lock (_indexLock)
+            // Slow path: need to re-index
+            // Use SemaphoreSlim for async-friendly locking to avoid thread pool starvation
+            await _indexSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
                 // Double-check after acquiring lock
                 if (_cache.TryGetValue(rootPath, out cached) && !IsDirty(rootPath))
@@ -68,14 +69,20 @@ namespace InstaSearch.Services
 
                 // Mark as not dirty before indexing to avoid race
                 _dirtyFlags[rootPath] = false;
-                files = Task.Run(() => IndexDirectory(rootPath, cancellationToken), cancellationToken).GetAwaiter().GetResult();
+
+                // Run indexing on thread pool without blocking
+                var files = await Task.Run(() => IndexDirectory(rootPath, cancellationToken), cancellationToken).ConfigureAwait(false);
                 _cache[rootPath] = files;
+
+                // Start watching for changes after initial index (idempotent)
+                StartWatching(rootPath);
+
+                return files;
             }
-
-            // Start watching for changes after initial index (idempotent)
-            StartWatching(rootPath);
-
-            return files;
+            finally
+            {
+                _indexSemaphore.Release();
+            }
         }
 
         private bool IsDirty(string rootPath)
@@ -243,13 +250,16 @@ namespace InstaSearch.Services
             StopAllWatching();
             _cache.Clear();
             _dirtyFlags.Clear();
+            _indexSemaphore.Dispose();
         }
 
         #endregion
 
         private List<FileEntry> IndexDirectory(string rootPath, CancellationToken cancellationToken)
         {
-            var results = new ConcurrentQueue<FileEntry>();
+            // Use ConcurrentBag instead of ConcurrentQueue - better for parallel add scenarios
+            // and allows direct conversion to List without dequeue loop
+            var results = new ConcurrentBag<FileEntry>();
             var pendingCount = 1; // Track outstanding work items
             var directories = new BlockingCollection<string>
             {
@@ -273,6 +283,9 @@ namespace InstaSearch.Services
                             // Get subdirectories first - this adds more work
                             foreach (var subDir in Directory.EnumerateDirectories(directory))
                             {
+                                if (cancellationToken.IsCancellationRequested)
+                                    break;
+
                                 var dirName = Path.GetFileName(subDir);
                                 if (!_ignoredDirectories.Contains(dirName))
                                 {
@@ -284,9 +297,12 @@ namespace InstaSearch.Services
                             // Process files in this directory
                             foreach (var file in Directory.EnumerateFiles(directory))
                             {
+                                if (cancellationToken.IsCancellationRequested)
+                                    break;
+
                                 var fileName = Path.GetFileName(file);
                                 var relativePath = GetRelativePath(rootPath, file);
-                                results.Enqueue(new FileEntry(fileName, file, relativePath));
+                                results.Add(new FileEntry(fileName, file, relativePath));
                             }
                         }
                         catch (UnauthorizedAccessException) { }
@@ -311,13 +327,8 @@ namespace InstaSearch.Services
                 throw;
             }
 
-            // Convert to list
-            var resultList = new List<FileEntry>(results.Count);
-            while (results.TryDequeue(out FileEntry entry))
-            {
-                resultList.Add(entry);
-            }
-            return resultList;
+            // Direct conversion - ConcurrentBag.ToList() is more efficient than dequeue loop
+            return results.ToList();
         }
 
         private static string GetRelativePath(string rootPath, string fullPath)
@@ -334,11 +345,24 @@ namespace InstaSearch.Services
     /// <summary>
     /// Represents an indexed file entry.
     /// </summary>
-    public class FileEntry(string fileName, string fullPath, string relativePath)
+    public class FileEntry
     {
-        public string FileName { get; } = fileName;
-        public string FullPath { get; } = fullPath;
-        public string RelativePath { get; } = relativePath;
-        public string FileNameLower { get; } = fileName.ToLowerInvariant();
+        private string _fileNameLower;
+
+        public FileEntry(string fileName, string fullPath, string relativePath)
+        {
+            FileName = fileName;
+            FullPath = fullPath;
+            RelativePath = relativePath;
+        }
+
+        public string FileName { get; }
+        public string FullPath { get; }
+        public string RelativePath { get; }
+
+        /// <summary>
+        /// Lazy-evaluated lowercase filename to avoid allocations when not needed.
+        /// </summary>
+        public string FileNameLower => _fileNameLower ??= FileName.ToLowerInvariant();
     }
 }
