@@ -2,32 +2,16 @@
   "$schema": "http://json.schemastore.org/vsix-publish",
   "categories": [ "data" ],
   "identity": {
-    "internalName": "CSVEditor",
-    "tags": [ "data", "csv", "tsv" ]
+    "internalName": "InstaSearch",
+    "tags": [ "search", "file", "navigation" ]
   },
   "assetFiles": [
     {
-      "pathOnDisk": "art/syntax-highlighting.png",
-      "targetPath": "art/syntax-highlighting.png"
-    },
-    {
-      "pathOnDisk": "art/column-alignment.png",
-      "targetPath": "art/column-alignment.png"
-    },
-    {
-      "pathOnDisk": "art/context-menu.png",
-      "targetPath": "art/context-menu.png"
-    },
-    {
-      "pathOnDisk": "art/quickinfo.png",
-      "targetPath": "art/quickinfo.png"
-    },
-    {
-      "pathOnDisk": "art/error-detection.png",
-      "targetPath": "art/error-detection.png"
+      "pathOnDisk": "art/search.gif",
+      "targetPath": "art/search.gif"
     }
   ],
   "overview": "README.md",
   "publisher": "MadsKristensen",
-  "repo": "https://github.com/madskristensen/CSVEditor"
+  "repo": "https://github.com/madskristensen/InstaSearch"
 }
