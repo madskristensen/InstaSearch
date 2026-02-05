@@ -1,4 +1,5 @@
 using System.Windows;
+using InstaSearch.Options;
 using InstaSearch.Services;
 using InstaSearch.UI;
 using Microsoft.VisualStudio.Shell.Interop;
@@ -13,6 +14,7 @@ namespace InstaSearch
         private static readonly SearchHistoryService _history = new();
         private static readonly SearchService _searchService = new(_indexer, _history);
         private static readonly SearchRootResolver _rootResolver = new();
+        private static RatingPrompt _ratingPrompt;
 
         protected override async Task ExecuteAsync(OleMenuCmdEventArgs e)
         {
@@ -54,6 +56,10 @@ namespace InstaSearch
 
                 // Open the file in VS
                 await VS.Documents.OpenAsync(filePath);
+
+                // Register successful usage for rating prompt
+                _ratingPrompt ??= new RatingPrompt("MadsKristensen.InstaSearch", Vsix.Name, await General.GetLiveInstanceAsync());
+                _ratingPrompt.RegisterSuccessfulUsage();
             }
         }
     }
