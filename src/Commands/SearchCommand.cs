@@ -20,7 +20,7 @@ namespace InstaSearch
         private static readonly SearchRootResolver _rootResolver = new();
         private static RatingPrompt _ratingPrompt;
 
-        private static HashSet<string> GetIgnoredFolders() => General.Instance.GetIgnoredFoldersSet();
+        private static IgnoredFolderFilter GetIgnoredFolders() => General.Instance.GetIgnoredFolderFilter();
         private static IReadOnlyList<string> GetIgnoredFilePatterns() => General.Instance.GetIgnoredFilePatternsList();
 
         // Track the open dialog instance to prevent multiple windows

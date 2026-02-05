@@ -13,20 +13,22 @@ namespace InstaSearch.Services
     /// <remarks>
     /// Creates a FileIndexer that uses the provided function to get ignored directories.
     /// </remarks>
-    /// <param name="getIgnoredDirectoriesFunc">Function that returns the set of ignored folder names.</param>
-    public class FileIndexer(Func<HashSet<string>> getIgnoredDirectoriesFunc) : IDisposable
+    /// <param name="getIgnoredDirectoriesFunc">Function that returns the ignored folder filter.</param>
+    public class FileIndexer(Func<IgnoredFolderFilter> getIgnoredDirectoriesFunc) : IDisposable
     {
         /// <summary>
         /// Default folders to ignore during file indexing.
         /// </summary>
-        private static readonly HashSet<string> _defaultIgnoredDirectories = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ".git", ".vs", ".idea", "bin", "obj", "node_modules", "packages",
-            ".nuget", "TestResults", "Debug", "Release", ".svn", ".hg"
-        };
+        private static readonly IgnoredFolderFilter _defaultIgnoredFilter = new(
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ".git", ".vs", ".idea", "bin", "obj", "node_modules", "packages",
+                ".nuget", "TestResults", "Debug", "Release", ".svn", ".hg"
+            },
+            []);
 
         // Cached ignored directories - refreshed on each index operation
-        private HashSet<string> _ignoredDirectories;
+        private IgnoredFolderFilter _ignoredFilter;
         private readonly object _ignoredDirectoriesLock = new();
 
         // Use IReadOnlyList to prevent mutation after caching
@@ -44,15 +46,15 @@ namespace InstaSearch.Services
         }
 
         /// <summary>
-        /// Gets the current set of ignored directories.
+        /// Gets the current ignored folder filter.
         /// </summary>
-        private HashSet<string> GetIgnoredDirectories()
+        private IgnoredFolderFilter GetIgnoredFilter()
         {
             lock (_ignoredDirectoriesLock)
             {
                 // Use the provided function, or fall back to defaults
-                _ignoredDirectories = getIgnoredDirectoriesFunc?.Invoke() ?? _defaultIgnoredDirectories;
-                return _ignoredDirectories;
+                _ignoredFilter = getIgnoredDirectoriesFunc?.Invoke() ?? _defaultIgnoredFilter;
+                return _ignoredFilter;
             }
         }
 
@@ -194,7 +196,7 @@ namespace InstaSearch.Services
         private void OnFileChanged(string rootPath, string fullPath)
         {
             // Ignore changes in excluded directories (optimized to reduce allocations)
-            if (IsInIgnoredDirectory(rootPath, fullPath, GetIgnoredDirectories()))
+            if (IsInIgnoredDirectory(rootPath, fullPath, GetIgnoredFilter()))
                 return;
 
             // Mark cache as dirty - will re-index on next search
@@ -223,15 +225,17 @@ namespace InstaSearch.Services
             }
         }
 
-        private static bool IsInIgnoredDirectory(string rootPath, string fullPath, HashSet<string> ignoredDirectories)
+        private static bool IsInIgnoredDirectory(string rootPath, string fullPath, IgnoredFolderFilter ignoredFilter)
         {
-            // Optimized: scan the path without allocating substrings
+            // Optimized: scan the path without allocating substrings for exact matches,
+            // but extract segment string when wildcard patterns are present
             var startIndex = rootPath.Length;
             if (startIndex < fullPath.Length && (fullPath[startIndex] == Path.DirectorySeparatorChar || fullPath[startIndex] == Path.AltDirectorySeparatorChar))
             {
                 startIndex++;
             }
 
+            var hasWildcards = ignoredFilter.WildcardPatterns.Count > 0;
             var segmentStart = startIndex;
             for (var i = startIndex; i <= fullPath.Length; i++)
             {
@@ -239,12 +243,23 @@ namespace InstaSearch.Services
                 {
                     if (i > segmentStart)
                     {
-                        // Check this segment against ignored directories
                         var segmentLength = i - segmentStart;
-                        foreach (var ignored in ignoredDirectories)
+
+                        // Check exact matches without allocating
+                        foreach (var ignored in ignoredFilter.ExactNames)
                         {
                             if (ignored.Length == segmentLength &&
                                 string.Compare(fullPath, segmentStart, ignored, 0, segmentLength, StringComparison.OrdinalIgnoreCase) == 0)
+                            {
+                                return true;
+                            }
+                        }
+
+                        // Check wildcard patterns (requires extracting the segment)
+                        if (hasWildcards)
+                        {
+                            var segment = fullPath.Substring(segmentStart, segmentLength);
+                            if (ignoredFilter.IsIgnored(segment))
                             {
                                 return true;
                             }
@@ -276,8 +291,8 @@ namespace InstaSearch.Services
 
         private List<FileEntry> IndexDirectory(string rootPath, CancellationToken cancellationToken)
         {
-            // Get the current set of ignored directories from options
-            HashSet<string> ignoredDirectories = GetIgnoredDirectories();
+            // Get the current ignored folder filter from options
+            IgnoredFolderFilter ignoredFilter = GetIgnoredFilter();
 
             // Use ConcurrentBag instead of ConcurrentQueue - better for parallel add scenarios
             // and allows direct conversion to List without dequeue loop
@@ -309,7 +324,7 @@ namespace InstaSearch.Services
                                     break;
 
                                 var dirName = Path.GetFileName(subDir);
-                                if (!ignoredDirectories.Contains(dirName))
+                                if (!ignoredFilter.IsIgnored(dirName))
                                 {
                                     Interlocked.Increment(ref pendingCount);
                                     directories.Add(subDir);
@@ -361,6 +376,56 @@ namespace InstaSearch.Services
                 return relative.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             }
             return fullPath;
+        }
+    }
+
+    /// <summary>
+    /// Holds both exact folder names and wildcard patterns for folder filtering.
+    /// </summary>
+    public class IgnoredFolderFilter(HashSet<string> exactNames, IReadOnlyList<string> wildcardPatterns)
+    {
+        public HashSet<string> ExactNames { get; } = exactNames;
+        public IReadOnlyList<string> WildcardPatterns { get; } = wildcardPatterns;
+
+        /// <summary>
+        /// Checks if a folder name should be ignored (exact match or wildcard match).
+        /// </summary>
+        public bool IsIgnored(string folderName)
+        {
+            if (ExactNames.Contains(folderName))
+            {
+                return true;
+            }
+
+            foreach (var pattern in WildcardPatterns)
+            {
+                if (MatchesWildcard(folderName, pattern))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Matches a folder name against a simple wildcard pattern (e.g., *.Migrations).
+        /// Supports leading wildcard: *.suffix
+        /// </summary>
+        private static bool MatchesWildcard(string folderName, string pattern)
+        {
+            if (pattern.Length == 0)
+            {
+                return false;
+            }
+
+            if (pattern[0] == '*')
+            {
+                var suffix = pattern.Substring(1);
+                return folderName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase);
+            }
+
+            return folderName.Equals(pattern, StringComparison.OrdinalIgnoreCase);
         }
     }
 }

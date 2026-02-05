@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using InstaSearch.Services;
 
 namespace InstaSearch.Options
 {
@@ -24,7 +25,7 @@ namespace InstaSearch.Options
 
         [Category("Search")]
         [DisplayName("Ignored Folders")]
-        [Description("Comma-separated list of folder names to exclude from search results. Changes take effect on next search.")]
+        [Description("Comma-separated list of folder names to exclude from search results. Supports wildcards (e.g., *.Migrations). Changes take effect on next search.")]
         [DefaultValue(_defaultIgnoredFolders)]
         public string IgnoredFolders { get; set; } = _defaultIgnoredFolders;
 
@@ -66,15 +67,16 @@ namespace InstaSearch.Options
         public double GetDialogHeight() => Math.Max(_minHeight, Math.Min(_maxHeight, DialogHeight));
 
         /// <summary>
-        /// Parses the IgnoredFolders string into a HashSet for efficient lookup.
+        /// Parses the IgnoredFolders string into an IgnoredFolderFilter with exact names and wildcard patterns.
         /// </summary>
-        public HashSet<string> GetIgnoredFoldersSet()
+        public IgnoredFolderFilter GetIgnoredFolderFilter()
         {
-            var folders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var exactNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var wildcardPatterns = new List<string>();
 
             if (string.IsNullOrWhiteSpace(IgnoredFolders))
             {
-                return folders;
+                return new IgnoredFolderFilter(exactNames, wildcardPatterns);
             }
 
             foreach (var folder in IgnoredFolders.Split(','))
@@ -82,11 +84,18 @@ namespace InstaSearch.Options
                 var trimmed = folder.Trim();
                 if (!string.IsNullOrEmpty(trimmed))
                 {
-                    folders.Add(trimmed);
+                    if (trimmed.Contains("*"))
+                    {
+                        wildcardPatterns.Add(trimmed);
+                    }
+                    else
+                    {
+                        exactNames.Add(trimmed);
+                    }
                 }
             }
 
-            return folders;
+            return new IgnoredFolderFilter(exactNames, wildcardPatterns);
         }
             /// <summary>
             /// Parses the IgnoredFilePatterns string into a list of lowercase patterns.

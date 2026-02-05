@@ -76,7 +76,7 @@ When you invoke Insta Search for the first time in a workspace, it performs a pa
 - `bin`, `obj`, `Debug`, `Release`
 - `node_modules`, `packages`, `.nuget`, `TestResults`
 
-You can customize this list in **Tools > Options > InstaSearch > General**.
+You can customize this list in **Tools > Options > InstaSearch > General**. Wildcard patterns like `*.Migrations` are also supported.
 
 The resulting file list is cached in memory. Subsequent searches reuse this cache, making them nearly instant.
 
@@ -86,7 +86,7 @@ Configure InstaSearch via **Tools > Options > InstaSearch > General**:
 
 | Setting               | Description                                                                                                 |
 | --------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Ignored Folders       | Comma-separated list of folder names to exclude from indexing.                                              |
+| Ignored Folders       | Comma-separated list of folder names to exclude from indexing. Supports `*` wildcards (e.g., `*.Migrations`). |
 | Ignored File Patterns | Comma-separated file name patterns to exclude from results (e.g., `*.designer.cs`). Supports `*` wildcards. |
 | Take over Go To All   | When enabled, `Ctrl+T` and `Ctrl+,` will open Insta Search instead of Go To All.                            |
 
