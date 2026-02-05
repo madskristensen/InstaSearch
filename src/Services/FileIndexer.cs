@@ -13,22 +13,21 @@ namespace InstaSearch.Services
     /// </summary>
     public class FileIndexer : IDisposable
     {
-        private static readonly HashSet<string> _ignoredDirectories = new(StringComparer.OrdinalIgnoreCase)
+        /// <summary>
+        /// Default folders to ignore during file indexing.
+        /// </summary>
+        private static readonly HashSet<string> _defaultIgnoredDirectories = new(StringComparer.OrdinalIgnoreCase)
         {
-            ".git",
-            ".vs",
-            ".idea",
-            "bin",
-            "obj",
-            "node_modules",
-            "packages",
-            ".nuget",
-            "TestResults",
-            "Debug",
-            "Release",
-            ".svn",
-            ".hg"
+            ".git", ".vs", ".idea", "bin", "obj", "node_modules", "packages",
+            ".nuget", "TestResults", "Debug", "Release", ".svn", ".hg"
         };
+
+        // Cached ignored directories - refreshed on each index operation
+        private HashSet<string> _ignoredDirectories;
+        private readonly object _ignoredDirectoriesLock = new();
+
+        // Optional function to get ignored directories (allows dependency injection for options)
+        private readonly Func<HashSet<string>> _getIgnoredDirectoriesFunc;
 
         // Use IReadOnlyList to prevent mutation after caching
         private readonly ConcurrentDictionary<string, IReadOnlyList<FileEntry>> _cache = new(StringComparer.OrdinalIgnoreCase);
@@ -36,6 +35,35 @@ namespace InstaSearch.Services
         private readonly ConcurrentDictionary<string, bool> _dirtyFlags = new(StringComparer.OrdinalIgnoreCase);
         private readonly SemaphoreSlim _indexSemaphore = new(1, 1);
         private bool _disposed;
+
+        /// <summary>
+        /// Creates a FileIndexer that uses the provided function to get ignored directories.
+        /// </summary>
+        /// <param name="getIgnoredDirectoriesFunc">Function that returns the set of ignored folder names.</param>
+        public FileIndexer(Func<HashSet<string>> getIgnoredDirectoriesFunc)
+        {
+            _getIgnoredDirectoriesFunc = getIgnoredDirectoriesFunc;
+        }
+
+        /// <summary>
+        /// Creates a FileIndexer with default ignored directories.
+        /// </summary>
+        public FileIndexer() : this(null)
+        {
+        }
+
+        /// <summary>
+        /// Gets the current set of ignored directories.
+        /// </summary>
+        private HashSet<string> GetIgnoredDirectories()
+        {
+            lock (_ignoredDirectoriesLock)
+            {
+                // Use the provided function, or fall back to defaults
+                _ignoredDirectories = _getIgnoredDirectoriesFunc?.Invoke() ?? _defaultIgnoredDirectories;
+                return _ignoredDirectories;
+            }
+        }
 
         /// <summary>
         /// Indexes all files under the given root directory using parallel enumeration.
@@ -175,7 +203,7 @@ namespace InstaSearch.Services
         private void OnFileChanged(string rootPath, string fullPath)
         {
             // Ignore changes in excluded directories (optimized to reduce allocations)
-            if (IsInIgnoredDirectory(rootPath, fullPath))
+            if (IsInIgnoredDirectory(rootPath, fullPath, GetIgnoredDirectories()))
                 return;
 
             // Mark cache as dirty - will re-index on next search
@@ -204,7 +232,7 @@ namespace InstaSearch.Services
             }
         }
 
-        private static bool IsInIgnoredDirectory(string rootPath, string fullPath)
+        private static bool IsInIgnoredDirectory(string rootPath, string fullPath, HashSet<string> ignoredDirectories)
         {
             // Optimized: scan the path without allocating substrings
             int startIndex = rootPath.Length;
@@ -222,7 +250,7 @@ namespace InstaSearch.Services
                     {
                         // Check this segment against ignored directories
                         int segmentLength = i - segmentStart;
-                        foreach (var ignored in _ignoredDirectories)
+                        foreach (var ignored in ignoredDirectories)
                         {
                             if (ignored.Length == segmentLength && 
                                 string.Compare(fullPath, segmentStart, ignored, 0, segmentLength, StringComparison.OrdinalIgnoreCase) == 0)
@@ -257,6 +285,9 @@ namespace InstaSearch.Services
 
         private List<FileEntry> IndexDirectory(string rootPath, CancellationToken cancellationToken)
         {
+            // Get the current set of ignored directories from options
+            var ignoredDirectories = GetIgnoredDirectories();
+
             // Use ConcurrentBag instead of ConcurrentQueue - better for parallel add scenarios
             // and allows direct conversion to List without dequeue loop
             var results = new ConcurrentBag<FileEntry>();
@@ -287,7 +318,7 @@ namespace InstaSearch.Services
                                     break;
 
                                 var dirName = Path.GetFileName(subDir);
-                                if (!_ignoredDirectories.Contains(dirName))
+                                if (!ignoredDirectories.Contains(dirName))
                                 {
                                     Interlocked.Increment(ref pendingCount);
                                     directories.Add(subDir);

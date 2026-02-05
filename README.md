@@ -32,24 +32,39 @@ Press `Alt+Space` to open the search dialog (or find it under **Edit > Go To > F
 
 ### Search Patterns
 
-| Pattern     | Matches                                    |
-| ----------- | ------------------------------------------ |
-| `dialog`    | Any file containing "dialog"               |
-| `test*.cs`  | Files starting with "test" ending in ".cs" |
-| `*service*` | Files containing "service" anywhere        |
-| `*.xaml`    | All XAML files                             |
+| Pattern      | Matches                                    |
+| ------------ | ------------------------------------------ |
+| `dialog`     | Any file containing "dialog"               |
+| `test*.cs`   | Files starting with "test" ending in ".cs" |
+| `*service*`  | Files containing "service" anywhere        |
+| `*.xaml`     | All XAML files                             |
+| `file.cs:42` | Opens file.cs and navigates to line 42     |
+
+### Go-to-Line
+
+Append `:lineNumber` to your search query to jump directly to a specific line after opening the file. For example:
+
+- `program.cs:100` - Opens program.cs at line 100
+- `test*:25` - Opens the first matching file at line 25
 
 ### Keyboard Shortcuts
 
-| Key                     | Action                         |
-| ----------------------- | ------------------------------ |
-| `Alt+Space`             | Open Insta Search              |
-| `Up` / `Down`           | Navigate results               |
-| `Page Up` / `Page Down` | Jump 10 items                  |
-| `Home` / `End`          | Jump to first / last result    |
-| `Enter`                 | Open selected file             |
-| `Ctrl+Enter`            | Open file and keep dialog open |
-| `Esc`                   | Close dialog                   |
+| Key                       | Action                              |
+| ------------------------- | ----------------------------------- |
+| `Alt+Space`               | Open Insta Search                   |
+| `Up` / `Down`             | Navigate results                    |
+| `Shift+Up` / `Shift+Down` | Extend selection                    |
+| `Page Up` / `Page Down`   | Jump 10 items                       |
+| `Home` / `End`            | Jump to first / last result         |
+| `Enter`                   | Open selected file(s)               |
+| `Ctrl+Enter`              | Open file and keep dialog open      |
+| `Ctrl+Click`              | Add/remove file from selection      |
+| `Shift+Click`             | Select range of files               |
+| `Esc`                     | Close dialog                        |
+
+### Multi-Select
+
+Hold `Ctrl` while clicking to select multiple files, or hold `Shift` to select a range. You can also use `Shift+Arrow` keys to extend your selection from the keyboard. Press `Enter` to open all selected files at once.
 
 ## How It Works
 
@@ -57,13 +72,25 @@ Insta Search maintains an in-memory index of all files in your workspace. The in
 
 ### Indexing
 
-When you invoke Insta Search for the first time in a workspace, it performs a parallel scan of the file system. Multiple threads pull directories from a shared work queue, which keeps all CPU cores busy without waiting for each directory level to complete. The following directories are excluded from indexing:
+When you invoke Insta Search for the first time in a workspace, it performs a parallel scan of the file system. Multiple threads pull directories from a shared work queue, which keeps all CPU cores busy without waiting for each directory level to complete. The following directories are excluded by default:
 
 - `.git`, `.vs`, `.svn`, `.hg`, `.idea`
 - `bin`, `obj`, `Debug`, `Release`
 - `node_modules`, `packages`, `.nuget`, `TestResults`
 
+You can customize this list in **Tools > Options > InstaSearch > General**.
+
 The resulting file list is cached in memory. Subsequent searches reuse this cache, making them nearly instant.
+
+### Options
+
+Configure InstaSearch via **Tools > Options > InstaSearch > General**:
+
+| Setting         | Description                                                    |
+| --------------- | -------------------------------------------------------------- |
+| Ignored Folders | Comma-separated list of folder names to exclude from indexing. |
+
+Changes to ignored folders take effect on the next search (the index is automatically refreshed).
 
 ### Live Updates
 

@@ -118,6 +118,7 @@
                      Grid.Row="1"
                      BorderThickness="0"
                      Background="Transparent"
+                     SelectionMode="Extended"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                      ScrollViewer.CanContentScroll="True"
                      VirtualizingStackPanel.IsVirtualizing="True"

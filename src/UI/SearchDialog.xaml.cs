@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows;
 using System.Windows.Input;
@@ -18,15 +20,33 @@ namespace InstaSearch.UI
     {
         private const int _debounceDelayMs = 150;
 
+        // Regex to match :lineNumber at the end of the query (e.g., "file.cs:42")
+        private static readonly Regex _lineNumberPattern = new(@":(\d+)$", RegexOptions.Compiled);
+
         private readonly SearchService _searchService;
         private readonly IVsImageService2 _imageService;
         private readonly string _rootPath;
         private readonly DispatcherTimer _debounceTimer;
         private CancellationTokenSource _searchCts;
-        private SearchResult _selectedResult;
+        private List<SearchResult> _selectedResults = [];
         private string _pendingQuery;
+        private int? _selectedLineNumber;
 
-        public SearchResult SelectedFile => _selectedResult;
+        /// <summary>
+        /// Gets the selected files. Use this for multi-select scenarios.
+        /// </summary>
+        public IReadOnlyList<SearchResult> SelectedFiles => _selectedResults;
+
+        /// <summary>
+        /// Gets the first selected file for backwards compatibility.
+        /// </summary>
+        public SearchResult SelectedFile => _selectedResults.Count > 0 ? _selectedResults[0] : null;
+
+        /// <summary>
+        /// Gets the line number to navigate to (1-based), or null if not specified.
+        /// Only applies to the first selected file.
+        /// </summary>
+        public int? SelectedLineNumber => _selectedLineNumber;
 
         public SearchDialog(SearchService searchService, IVsImageService2 imageService, string rootPath)
         {
@@ -71,6 +91,29 @@ namespace InstaSearch.UI
             await PerformSearchAsync(_pendingQuery);
         }
 
+        /// <summary>
+        /// Parses the query to extract file search text and optional line number.
+        /// </summary>
+        /// <param name="query">The raw query (e.g., "file.cs:42")</param>
+        /// <returns>Tuple of (searchQuery, lineNumber or null)</returns>
+        private static (string searchQuery, int? lineNumber) ParseQueryWithLineNumber(string query)
+        {
+            if (string.IsNullOrEmpty(query))
+            {
+                return (query, null);
+            }
+
+            var match = _lineNumberPattern.Match(query);
+            if (match.Success && int.TryParse(match.Groups[1].Value, out int lineNumber) && lineNumber > 0)
+            {
+                // Remove the :lineNumber suffix from the search query
+                var searchQuery = query.Substring(0, match.Index);
+                return (searchQuery, lineNumber);
+            }
+
+            return (query, null);
+        }
+
         private async Task PerformSearchAsync(string query)
         {
             // Cancel any pending search
@@ -82,7 +125,11 @@ namespace InstaSearch.UI
             {
                 StatusText.Text = "Searching...";
 
-                IReadOnlyList<SearchResult> results = await _searchService.SearchAsync(_rootPath, query, _imageService, 100, token);
+                // Parse line number from query (e.g., "file.cs:42")
+                var (searchQuery, lineNumber) = ParseQueryWithLineNumber(query);
+                _selectedLineNumber = lineNumber;
+
+                IReadOnlyList<SearchResult> results = await _searchService.SearchAsync(_rootPath, searchQuery, _imageService, 100, token);
 
                 if (!token.IsCancellationRequested)
                 {
@@ -92,7 +139,9 @@ namespace InstaSearch.UI
                     {
                         ResultsListBox.SelectedIndex = 0;
                         ResultsListBox.ScrollIntoView(ResultsListBox.Items[0]);
-                        StatusText.Text = $"{results.Count} file{(results.Count == 1 ? "" : "s")} found";
+
+                        var lineInfo = lineNumber.HasValue ? $" (line {lineNumber})" : "";
+                        StatusText.Text = $"{results.Count} file{(results.Count == 1 ? "" : "s")} found{lineInfo}";
                     }
                     else
                     {
@@ -114,10 +163,12 @@ namespace InstaSearch.UI
 
         private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
         {
+            bool shiftHeld = (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift;
+
             switch (e.Key)
             {
                 case Key.Escape:
-                    _selectedResult = null;
+                    _selectedResults.Clear();
                     DialogResult = false;
                     Close();
                     e.Handled = true;
@@ -136,64 +187,124 @@ namespace InstaSearch.UI
                     break;
 
                 case Key.Down:
-                    MoveSelection(1);
+                    MoveSelection(1, shiftHeld);
                     e.Handled = true;
                     break;
 
                 case Key.Up:
-                    MoveSelection(-1);
+                    MoveSelection(-1, shiftHeld);
                     e.Handled = true;
                     break;
 
                 case Key.PageDown:
-                    MoveSelection(10);
+                    MoveSelection(10, shiftHeld);
                     e.Handled = true;
                     break;
 
                 case Key.PageUp:
-                    MoveSelection(-10);
+                    MoveSelection(-10, shiftHeld);
                     e.Handled = true;
                     break;
 
                 case Key.Home:
-                    // Only navigate results when Shift is not pressed (Shift+Home selects text)
-                    if (Keyboard.Modifiers == ModifierKeys.None && ResultsListBox.Items.Count > 0)
+                    // Only navigate results when Shift is not pressed (Shift+Home selects text in search box)
+                    if (!shiftHeld && ResultsListBox.Items.Count > 0)
                     {
+                        _selectionAnchor = 0;
+                        _focusIndex = 0;
                         ResultsListBox.SelectedIndex = 0;
-                        ResultsListBox.ScrollIntoView(ResultsListBox.SelectedItem);
+                        ResultsListBox.ScrollIntoView(ResultsListBox.Items[0]);
                         e.Handled = true;
                     }
                     break;
 
                 case Key.End:
-                    // Only navigate results when Shift is not pressed (Shift+End selects text)
-                    if (Keyboard.Modifiers == ModifierKeys.None && ResultsListBox.Items.Count > 0)
+                    // Only navigate results when Shift is not pressed (Shift+End selects text in search box)
+                    if (!shiftHeld && ResultsListBox.Items.Count > 0)
                     {
-                        ResultsListBox.SelectedIndex = ResultsListBox.Items.Count - 1;
-                        ResultsListBox.ScrollIntoView(ResultsListBox.SelectedItem);
+                        int lastIndex = ResultsListBox.Items.Count - 1;
+                        _selectionAnchor = lastIndex;
+                        _focusIndex = lastIndex;
+                        ResultsListBox.SelectedIndex = lastIndex;
+                        ResultsListBox.ScrollIntoView(ResultsListBox.Items[lastIndex]);
                         e.Handled = true;
                     }
                     break;
             }
         }
 
-        private void MoveSelection(int delta)
+        // Track the anchor point for shift-selection and current focus position
+        private int _selectionAnchor = -1;
+        private int _focusIndex = 0;
+
+        private void MoveSelection(int delta, bool extendSelection)
         {
             if (ResultsListBox.Items.Count == 0)
                 return;
 
-            var newIndex = ResultsListBox.SelectedIndex + delta;
+            // Use focus index for calculating new position (not SelectedIndex which returns first selected item)
+            if (_focusIndex < 0 || _focusIndex >= ResultsListBox.Items.Count)
+            {
+                _focusIndex = ResultsListBox.SelectedIndex >= 0 ? ResultsListBox.SelectedIndex : 0;
+            }
+
+            int newIndex = _focusIndex + delta;
             newIndex = Math.Max(0, Math.Min(newIndex, ResultsListBox.Items.Count - 1));
 
-            ResultsListBox.SelectedIndex = newIndex;
-            ResultsListBox.ScrollIntoView(ResultsListBox.SelectedItem);
+            if (extendSelection)
+            {
+                ExtendSelectionTo(newIndex);
+            }
+            else
+            {
+                // Reset anchor when not extending
+                _selectionAnchor = newIndex;
+                ResultsListBox.SelectedIndex = newIndex;
+            }
+
+            // Update focus index to track where we are
+            _focusIndex = newIndex;
+            ResultsListBox.ScrollIntoView(ResultsListBox.Items[newIndex]);
+        }
+
+        /// <summary>
+        /// Extends the selection from the anchor point to the target index.
+        /// </summary>
+        private void ExtendSelectionTo(int targetIndex)
+        {
+            if (ResultsListBox.Items.Count == 0)
+                return;
+
+            // Initialize anchor if not set
+            if (_selectionAnchor < 0 || _selectionAnchor >= ResultsListBox.Items.Count)
+            {
+                _selectionAnchor = ResultsListBox.SelectedIndex >= 0 ? ResultsListBox.SelectedIndex : 0;
+            }
+
+            // Update focus index
+            _focusIndex = targetIndex;
+
+            // Calculate range
+            int start = Math.Min(_selectionAnchor, targetIndex);
+            int end = Math.Max(_selectionAnchor, targetIndex);
+
+            // Clear and select range
+            ResultsListBox.SelectedItems.Clear();
+            for (int i = start; i <= end; i++)
+            {
+                ResultsListBox.SelectedItems.Add(ResultsListBox.Items[i]);
+            }
         }
 
         private void SelectCurrentItem()
         {
-            if (ResultsListBox.SelectedItem is SearchResult result)
+            // Get all selected items (supports multi-select with Ctrl+Click or Shift+Click)
+            _selectedResults = ResultsListBox.SelectedItems
+                .Cast<SearchResult>()
+                .ToList();
+
+            if (_selectedResults.Count > 0)
             {
-                _selectedResult = result;
                 DialogResult = true;
                 Close();
             }

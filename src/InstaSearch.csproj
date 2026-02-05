@@ -46,6 +46,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Options\General.cs" />
+    <Compile Include="Options\OptionsProvider.cs" />
     <Compile Include="Services\FileIndexer.cs" />
     <Compile Include="Services\SearchHistoryService.cs" />
     <Compile Include="Services\SearchRootResolver.cs" />
