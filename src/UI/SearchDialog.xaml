@@ -5,6 +5,7 @@
         xmlns:imaging="clr-namespace:Microsoft.VisualStudio.Imaging;assembly=Microsoft.VisualStudio.Imaging"
         xmlns:theming="clr-namespace:Microsoft.VisualStudio.PlatformUI;assembly=Microsoft.VisualStudio.Imaging"
         xmlns:catalog="clr-namespace:Microsoft.VisualStudio.Imaging;assembly=Microsoft.VisualStudio.ImageCatalog"
+        xmlns:local="clr-namespace:InstaSearch.UI"
         Title="InstaSearch - Quick File Search"
         WindowStartupLocation="CenterOwner"
         WindowStyle="None"
@@ -141,10 +142,10 @@
 
                             <!-- File Name and Path -->
                             <StackPanel Grid.Column="1" Orientation="Vertical">
-                                <TextBlock Text="{Binding FileName, Mode=OneTime}" 
-                                           FontSize="13"
-                                           FontWeight="SemiBold"
-                                           Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"/>
+                                <local:HighlightTextBlock SourceText="{Binding FileName, Mode=OneTime}"
+                                                          HighlightText="{Binding Query, Mode=OneTime}"
+                                                          FontSize="13"
+                                                          Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"/>
                                 <TextBlock Text="{Binding RelativePath, Mode=OneTime}" 
                                            FontSize="10"
                                            Opacity="0.6"
@@ -192,7 +193,7 @@
                                VerticalAlignment="Center"
                                Opacity="0.7"
                                Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"
-                               Text="↑↓ Navigate • Enter Open • Esc Close"/>
+                               Text="↑↓ Navigate • Enter Open • Ctrl+Enter Keep Open • Esc Close"/>
                 </Grid>
             </Border>
         </Grid>

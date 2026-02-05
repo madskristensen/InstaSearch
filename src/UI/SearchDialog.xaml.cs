@@ -118,7 +118,14 @@ namespace InstaSearch.UI
                     break;
 
                 case Key.Enter:
-                    SelectCurrentItem();
+                    if (Keyboard.Modifiers == ModifierKeys.Control)
+                    {
+                        OpenFileWithoutClosing();
+                    }
+                    else
+                    {
+                        SelectCurrentItem();
+                    }
                     e.Handled = true;
                     break;
 
@@ -140,6 +147,26 @@ namespace InstaSearch.UI
                 case Key.PageUp:
                     MoveSelection(-10);
                     e.Handled = true;
+                    break;
+
+                case Key.Home:
+                    // Only navigate results when Shift is not pressed (Shift+Home selects text)
+                    if (Keyboard.Modifiers == ModifierKeys.None && ResultsListBox.Items.Count > 0)
+                    {
+                        ResultsListBox.SelectedIndex = 0;
+                        ResultsListBox.ScrollIntoView(ResultsListBox.SelectedItem);
+                        e.Handled = true;
+                    }
+                    break;
+
+                case Key.End:
+                    // Only navigate results when Shift is not pressed (Shift+End selects text)
+                    if (Keyboard.Modifiers == ModifierKeys.None && ResultsListBox.Items.Count > 0)
+                    {
+                        ResultsListBox.SelectedIndex = ResultsListBox.Items.Count - 1;
+                        ResultsListBox.ScrollIntoView(ResultsListBox.SelectedItem);
+                        e.Handled = true;
+                    }
                     break;
             }
         }
@@ -163,6 +190,22 @@ namespace InstaSearch.UI
                 _selectedResult = result;
                 DialogResult = true;
                 Close();
+            }
+        }
+
+        private async void OpenFileWithoutClosing()
+        {
+            if (ResultsListBox.SelectedItem is SearchResult result)
+            {
+                try
+                {
+                    await VS.Documents.OpenAsync(result.FullPath);
+                    await _searchService.RecordSelectionAsync(result.FullPath);
+                }
+                catch (Exception ex)
+                {
+                    StatusText.Text = $"Error opening file: {ex.Message}";
+                }
             }
         }
 

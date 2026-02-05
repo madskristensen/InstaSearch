@@ -19,6 +19,7 @@ A fast, lightweight file search dialog for Visual Studio. Instantly find and ope
 ## Features
 
 - **Instant search** - Results appear as you type with wildcard support (`test*.cs`)
+- **Query highlighting** - Matching text is highlighted in results for easy identification
 - **Smart history** - Recently opened files appear first, prioritized by frequency
 - **Live index** - File changes are detected automatically via FileSystemWatcher
 - **File icons** - Visual Studio file icons for easy identification
@@ -40,13 +41,15 @@ Press `Alt+Space` to open the search dialog (or find it under **Edit > Go To > F
 
 ### Keyboard Shortcuts
 
-| Key                     | Action             |
-| ----------------------- | ------------------ |
-| `Alt+Space`             | Open Insta Search   |
-| Up / Down               | Navigate results   |
-| `Page Up` / `Page Down` | Jump 10 items      |
-| `Enter`                 | Open selected file |
-| `Esc`                   | Close dialog       |
+| Key                     | Action                         |
+| ----------------------- | ------------------------------ |
+| `Alt+Space`             | Open Insta Search              |
+| `Up` / `Down`           | Navigate results               |
+| `Page Up` / `Page Down` | Jump 10 items                  |
+| `Home` / `End`          | Jump to first / last result    |
+| `Enter`                 | Open selected file             |
+| `Ctrl+Enter`            | Open file and keep dialog open |
+| `Esc`                   | Close dialog                   |
 
 ## How It Works
 

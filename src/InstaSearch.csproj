@@ -50,6 +50,7 @@
     <Compile Include="Services\SearchHistoryService.cs" />
     <Compile Include="Services\SearchRootResolver.cs" />
     <Compile Include="Services\SearchService.cs" />
+    <Compile Include="UI\HighlightTextBlock.cs" />
     <Compile Include="UI\SearchDialog.xaml.cs">
       <DependentUpon>SearchDialog.xaml</DependentUpon>
     </Compile>
