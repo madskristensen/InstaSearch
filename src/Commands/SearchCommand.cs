@@ -66,7 +66,7 @@ namespace InstaSearch
             dialog.Closed += (s, args) => _openDialog = null;
             _openDialog = dialog;
 
-            dialog.Show();
+            dialog.ShowDialog();
         }
 
         private static async void OnFilesSelected(object sender, FilesSelectedEventArgs e)

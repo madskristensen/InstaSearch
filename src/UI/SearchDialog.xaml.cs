@@ -4,7 +4,6 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows;
 using System.Windows.Input;
-using System.Windows.Media;
 using System.Windows.Threading;
 using InstaSearch.Options;
 using InstaSearch.Services;
@@ -41,6 +40,7 @@ namespace InstaSearch.UI
         private List<SearchResult> _selectedResults = [];
         private string _pendingQuery;
         private int? _selectedLineNumber;
+        private bool _isClosing;
 
         /// <summary>
         /// Raised when files are selected and should be opened.
@@ -82,35 +82,17 @@ namespace InstaSearch.UI
             _debounceTimer.Tick += DebounceTimer_Tick;
 
             Loaded += SearchDialog_Loaded;
-            LostKeyboardFocus += SearchDialog_LostKeyboardFocus;
+            Deactivated += SearchDialog_Deactivated;
         }
 
-        private void SearchDialog_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+        private void SearchDialog_Deactivated(object sender, EventArgs e)
         {
-            // Only close if focus moved outside the dialog entirely
-            if (e.NewFocus is not DependencyObject newFocus || !IsDescendant(this, newFocus))
+            // Close when user clicks outside the dialog (but not if already closing)
+            if (!_isClosing)
             {
+                _isClosing = true;
                 Close();
             }
-        }
-
-        private static bool IsDescendant(DependencyObject parent, DependencyObject child)
-        {
-            DependencyObject current = child;
-            while (current != null)
-            {
-                if (current == parent)
-                {
-                    return true;
-                }
-
-                // Try visual tree first, fall back to logical tree (for TextElements like Hyperlink)
-                current = current is Visual
-                    ? VisualTreeHelper.GetParent(current)
-                    : LogicalTreeHelper.GetParent(current);
-            }
-
-            return false;
         }
 
         private async void SearchDialog_Loaded(object sender, RoutedEventArgs e)
@@ -213,6 +195,7 @@ namespace InstaSearch.UI
             {
                 case Key.Escape:
                     _selectedResults.Clear();
+                    _isClosing = true;
                     DialogResult = false;
                     Close();
                     e.Handled = true;
@@ -327,6 +310,7 @@ namespace InstaSearch.UI
 
             if (_selectedResults.Count > 0)
             {
+                _isClosing = true;
                 FilesSelected?.Invoke(this, new FilesSelectedEventArgs(_selectedResults, _selectedLineNumber));
                 Close();
             }
