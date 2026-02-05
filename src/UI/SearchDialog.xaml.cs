@@ -177,6 +177,14 @@ namespace InstaSearch.UI
             SearchTextBox.Focus();
         }
 
+        private async void RefreshLink_Click(object sender, RoutedEventArgs e)
+        {
+            // Invalidate cache and re-search
+            _searchService.RefreshIndex(_rootPath);
+            await PerformSearchAsync(SearchTextBox.Text);
+            SearchTextBox.Focus();
+        }
+
         protected override void OnClosed(EventArgs e)
         {
             _debounceTimer.Stop();

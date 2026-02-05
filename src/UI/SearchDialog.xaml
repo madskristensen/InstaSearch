@@ -166,13 +166,28 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <TextBlock x:Name="StatusText"
                                Grid.Column="0"
                                FontSize="11"
                                VerticalAlignment="Center"
                                Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"/>
+
+                    <!-- Refresh Link -->
                     <TextBlock Grid.Column="1"
+                               FontSize="11"
+                               VerticalAlignment="Center"
+                               Margin="0,0,12,0"
+                               Cursor="Hand"
+                               MouseLeftButtonDown="RefreshLink_Click">
+                        <Hyperlink Click="RefreshLink_Click"
+                                   Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ControlLinkTextBrushKey}}">
+                            <Run Text="Refresh"/>
+                        </Hyperlink>
+                    </TextBlock>
+
+                    <TextBlock Grid.Column="2"
                                FontSize="11"
                                VerticalAlignment="Center"
                                Opacity="0.7"

@@ -20,6 +20,7 @@ A fast, lightweight file search dialog for Visual Studio. Instantly find and ope
 
 - **Instant search** - Results appear as you type with wildcard support (`test*.cs`)
 - **Smart history** - Recently opened files appear first, prioritized by frequency
+- **Live index** - File changes are detected automatically via FileSystemWatcher
 - **File icons** - Visual Studio file icons for easy identification
 - **Keyboard-driven** - Navigate entirely with keyboard
 - **VS themed** - Follows your Visual Studio light/dark theme
@@ -30,47 +31,64 @@ Press `Alt+Space` to open the search dialog (or find it under **Edit > Go To > I
 
 ### Search Patterns
 
-| Pattern | Matches |
-| ------- | ------- |
-| `dialog` | Any file containing "dialog" |
-| `test*.cs` | Files starting with "test" ending in ".cs" |
-| `*service*` | Files containing "service" anywhere |
-| `*.xaml` | All XAML files |
+| Pattern     | Matches                                    |
+| ----------- | ------------------------------------------ |
+| `dialog`    | Any file containing "dialog"               |
+| `test*.cs`  | Files starting with "test" ending in ".cs" |
+| `*service*` | Files containing "service" anywhere        |
+| `*.xaml`    | All XAML files                             |
 
 ### Keyboard Shortcuts
 
 | Key                     | Action             |
 | ----------------------- | ------------------ |
 | `Alt+Space`             | Open InstaSearch   |
-| `↑` / `↓`               | Navigate results   |
+| Up / Down               | Navigate results   |
 | `Page Up` / `Page Down` | Jump 10 items      |
 | `Enter`                 | Open selected file |
 | `Esc`                   | Close dialog       |
 
-## How It's So Fast
+## How It Works
 
-InstaSearch uses several performance techniques to deliver sub-millisecond search results:
+InstaSearch maintains an in-memory index of all files in your workspace. The index is built once when you first open the search dialog, then kept up to date automatically.
 
-### Parallel File System Indexing
-- **Work-stealing thread pool** — Multiple threads continuously pull directories from a shared queue, eliminating synchronization barriers between directory levels
-- **BlockingCollection with atomic completion detection** — No busy-waiting or race conditions when determining traversal completion
-- **Smart directory exclusion** — Skips `.git`, `node_modules`, `bin`, `obj`, and other non-essential directories at enumeration time
+### Indexing
 
-### Zero-Allocation Search Path
-- **Pre-computed lowercase filenames** — Case-insensitive matching without per-search `ToLower()` allocations
-- **Segment-based wildcard matching** — Patterns like `test*.cs` are split once into `["test", ".cs"]` and matched via `IndexOf` chains—no regex compilation or backtracking
-- **Deferred icon resolution** — File icons are fetched only for the final top-100 results, not all matches
+When you invoke InstaSearch for the first time in a workspace, it performs a parallel scan of the file system. Multiple threads pull directories from a shared work queue, which keeps all CPU cores busy without waiting for each directory level to complete. The following directories are excluded from indexing:
 
-### WPF Virtualization
-- **VirtualizingStackPanel with container recycling** — Only visible list items are rendered; scrolling reuses existing UI elements
-- **OneTime bindings** — Search results are immutable, so WPF skips change-notification overhead
+- `.git`, `.vs`, `.svn`, `.hg`, `.idea`
+- `bin`, `obj`, `Debug`, `Release`
+- `node_modules`, `packages`, `.nuget`, `TestResults`
 
-### Debounced Input
-- **150ms keystroke debounce** — Rapid typing doesn't trigger redundant searches; only the final query executes
+The resulting file list is cached in memory. Subsequent searches reuse this cache, making them nearly instant.
+
+### Live Updates
+
+After the initial index is built, a FileSystemWatcher monitors the workspace for file creates, deletes, and renames. When a change is detected (outside of ignored directories), the cache is marked as "dirty" rather than updated immediately. The next time you open the search dialog, the index is rebuilt.
+
+This lazy approach means that build operations (which may touch hundreds of files in `bin` and `obj`) cause no processing overhead. Only one re-index happens, and only when you actually search.
+
+If the FileSystemWatcher fails to start (for example, on a network drive), InstaSearch falls back to the cached index. You can manually refresh by clicking the "Refresh" link in the status bar.
+
+### Searching
+
+When you type a query, InstaSearch filters the cached file list using case-insensitive substring matching. If your query contains wildcards (`*`), it splits the pattern into segments and checks that each segment appears in order within the filename. For example, `test*.cs` becomes `["test", ".cs"]` and matches any filename that starts with "test" and ends with ".cs".
+
+Results are ranked by:
+
+1. History score (files you have opened before are ranked higher)
+2. Whether the filename starts with your query
+3. Alphabetical order
+
+Only the top 100 results are returned. File icons are fetched only for these final results, avoiding unnecessary work for matches that will not be displayed.
+
+### History
+
+InstaSearch tracks which files you open and how often. This history is stored per-workspace in a JSON file under `%LocalAppData%\InstaSearch`. When you open the search dialog with an empty query, your most frequently opened files are shown. When you type a query, files you have opened before are ranked higher in the results.
 
 ## How can I help?
 
-If you enjoy using the extension, please give it a ★★★★★ rating on the [Visual Studio Marketplace][marketplace].
+If you enjoy using the extension, please give it a rating on the [Visual Studio Marketplace][marketplace].
 
 Should you encounter bugs or have feature requests, head over to the [GitHub repo][repo] to open an issue if one doesn't already exist.
 

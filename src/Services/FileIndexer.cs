@@ -1,15 +1,16 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace InstaSearch.Services
 {
     /// <summary>
-    /// Fast parallel file system indexer with caching and ignore patterns.
+    /// Fast parallel file system indexer with caching, ignore patterns, and live file watching.
     /// </summary>
-    public class FileIndexer
+    public class FileIndexer : IDisposable
     {
         private static readonly HashSet<string> _ignoredDirectories = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -28,11 +29,16 @@ namespace InstaSearch.Services
             ".hg"
         };
 
-        private readonly ConcurrentDictionary<string, List<FileEntry>> _cache = new(StringComparer.OrdinalIgnoreCase);
+        // Use IReadOnlyList to prevent mutation after caching
+        private readonly ConcurrentDictionary<string, IReadOnlyList<FileEntry>> _cache = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, FileSystemWatcher> _watchers = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, bool> _dirtyFlags = new(StringComparer.OrdinalIgnoreCase);
+        private readonly object _indexLock = new();
+        private bool _disposed;
 
         /// <summary>
         /// Indexes all files under the given root directory using parallel enumeration.
-        /// Results are cached per root directory.
+        /// Results are cached per root directory and kept up-to-date via FileSystemWatcher.
         /// </summary>
         public async Task<IReadOnlyList<FileEntry>> IndexAsync(string rootPath, CancellationToken cancellationToken = default)
         {
@@ -43,30 +49,202 @@ namespace InstaSearch.Services
 
             rootPath = Path.GetFullPath(rootPath);
 
-            if (_cache.TryGetValue(rootPath, out List<FileEntry> cached))
+            // Fast path: cache hit and not dirty
+            if (_cache.TryGetValue(rootPath, out var cached) && !IsDirty(rootPath))
             {
                 return cached;
             }
 
-            List<FileEntry> files = await Task.Run(() => IndexDirectory(rootPath, cancellationToken), cancellationToken);
-            _cache[rootPath] = files;
+            // Slow path: need to re-index (with lock to prevent concurrent re-indexing of same root)
+            IReadOnlyList<FileEntry> files;
+            lock (_indexLock)
+            {
+                // Double-check after acquiring lock
+                if (_cache.TryGetValue(rootPath, out cached) && !IsDirty(rootPath))
+                {
+                    return cached;
+                }
+
+                // Mark as not dirty before indexing to avoid race
+                _dirtyFlags[rootPath] = false;
+                files = Task.Run(() => IndexDirectory(rootPath, cancellationToken), cancellationToken).GetAwaiter().GetResult();
+                _cache[rootPath] = files;
+            }
+
+            // Start watching for changes after initial index (idempotent)
+            StartWatching(rootPath);
+
             return files;
         }
 
+        private bool IsDirty(string rootPath)
+        {
+            return _dirtyFlags.TryGetValue(rootPath, out var dirty) && dirty;
+        }
+
+        private void MarkDirty(string rootPath)
+        {
+            _dirtyFlags[rootPath] = true;
+        }
+
         /// <summary>
-        /// Clears the cache for a specific root or all roots.
+        /// Clears the cache for a specific root or all roots and stops watching.
         /// </summary>
         public void InvalidateCache(string rootPath = null)
         {
             if (rootPath == null)
             {
                 _cache.Clear();
+                _dirtyFlags.Clear();
+                StopAllWatching();
             }
             else
             {
-                _cache.TryRemove(Path.GetFullPath(rootPath), out _);
+                var normalizedPath = Path.GetFullPath(rootPath);
+                _cache.TryRemove(normalizedPath, out _);
+                _dirtyFlags.TryRemove(normalizedPath, out _);
+                StopWatching(normalizedPath);
             }
         }
+
+        #region FileSystemWatcher
+
+        private void StartWatching(string rootPath)
+        {
+            if (_disposed || _watchers.ContainsKey(rootPath))
+                return;
+
+            try
+            {
+                var watcher = new FileSystemWatcher(rootPath)
+                {
+                    IncludeSubdirectories = true,
+                    NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName,
+                    InternalBufferSize = 65536 // 64KB buffer to reduce overflow risk
+                };
+
+                // Store rootPath in watcher.Site.Name or use a wrapper to avoid closure allocation
+                // Use a single handler method to reduce allocations
+                watcher.Created += Watcher_OnChanged;
+                watcher.Deleted += Watcher_OnChanged;
+                watcher.Renamed += Watcher_OnRenamed;
+                watcher.Error += Watcher_OnError;
+
+                watcher.EnableRaisingEvents = true;
+                _watchers[rootPath] = watcher;
+            }
+            catch (Exception)
+            {
+                // Watcher failed to start (e.g., network drive, permissions)
+                // Fall back to cache-only mode - searches still work, just not live
+            }
+        }
+
+        private void Watcher_OnChanged(object sender, FileSystemEventArgs e)
+        {
+            if (sender is FileSystemWatcher watcher)
+            {
+                OnFileChanged(watcher.Path, e.FullPath);
+            }
+        }
+
+        private void Watcher_OnRenamed(object sender, RenamedEventArgs e)
+        {
+            if (sender is FileSystemWatcher watcher)
+            {
+                OnFileChanged(watcher.Path, e.FullPath);
+            }
+        }
+
+        private void Watcher_OnError(object sender, ErrorEventArgs e)
+        {
+            if (sender is FileSystemWatcher watcher)
+            {
+                MarkDirty(watcher.Path);
+            }
+        }
+
+        private void OnFileChanged(string rootPath, string fullPath)
+        {
+            // Ignore changes in excluded directories (optimized to reduce allocations)
+            if (IsInIgnoredDirectory(rootPath, fullPath))
+                return;
+
+            // Mark cache as dirty - will re-index on next search
+            MarkDirty(rootPath);
+        }
+
+        private void StopWatching(string rootPath)
+        {
+            if (_watchers.TryRemove(rootPath, out var watcher))
+            {
+                // Unsubscribe to prevent leaks
+                watcher.Created -= Watcher_OnChanged;
+                watcher.Deleted -= Watcher_OnChanged;
+                watcher.Renamed -= Watcher_OnRenamed;
+                watcher.Error -= Watcher_OnError;
+                watcher.EnableRaisingEvents = false;
+                watcher.Dispose();
+            }
+        }
+
+        private void StopAllWatching()
+        {
+            foreach (var rootPath in _watchers.Keys.ToList())
+            {
+                StopWatching(rootPath);
+            }
+        }
+
+        private static bool IsInIgnoredDirectory(string rootPath, string fullPath)
+        {
+            // Optimized: scan the path without allocating substrings
+            int startIndex = rootPath.Length;
+            if (startIndex < fullPath.Length && (fullPath[startIndex] == Path.DirectorySeparatorChar || fullPath[startIndex] == Path.AltDirectorySeparatorChar))
+            {
+                startIndex++;
+            }
+
+            int segmentStart = startIndex;
+            for (int i = startIndex; i <= fullPath.Length; i++)
+            {
+                if (i == fullPath.Length || fullPath[i] == Path.DirectorySeparatorChar || fullPath[i] == Path.AltDirectorySeparatorChar)
+                {
+                    if (i > segmentStart)
+                    {
+                        // Check this segment against ignored directories
+                        int segmentLength = i - segmentStart;
+                        foreach (var ignored in _ignoredDirectories)
+                        {
+                            if (ignored.Length == segmentLength && 
+                                string.Compare(fullPath, segmentStart, ignored, 0, segmentLength, StringComparison.OrdinalIgnoreCase) == 0)
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                    segmentStart = i + 1;
+                }
+            }
+            return false;
+        }
+
+        #endregion
+
+        #region IDisposable
+
+        public void Dispose()
+        {
+            if (_disposed)
+                return;
+
+            _disposed = true;
+            StopAllWatching();
+            _cache.Clear();
+            _dirtyFlags.Clear();
+        }
+
+        #endregion
 
         private List<FileEntry> IndexDirectory(string rootPath, CancellationToken cancellationToken)
         {
@@ -140,8 +318,6 @@ namespace InstaSearch.Services
             }
             return resultList;
         }
-
-        // ProcessDirectory is no longer needed - logic moved inline above
 
         private static string GetRelativePath(string rootPath, string fullPath)
         {
