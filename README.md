@@ -55,7 +55,6 @@ Append `:lineNumber` to your search query to jump directly to a specific line af
 | `Up` / `Down`             | Navigate results                    |
 | `Shift+Up` / `Shift+Down` | Extend selection                    |
 | `Page Up` / `Page Down`   | Jump 10 items                       |
-| `Home` / `End`            | Jump to first / last result         |
 | `Enter`                   | Open selected file(s)               |
 | `Ctrl+Enter`              | Open file and keep dialog open      |
 | `Ctrl+Click`              | Add/remove file from selection      |
