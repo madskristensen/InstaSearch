@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,7 +11,7 @@ namespace InstaSearch.Services
     /// <summary>
     /// Fast file search service with history-based ranking.
     /// </summary>
-    public class SearchService(FileIndexer indexer, SearchHistoryService history)
+    public class SearchService(FileIndexer indexer, SearchHistoryService history, Func<IReadOnlyList<string>> getIgnoredFilePatterns = null)
     {
 
         /// <summary>
@@ -44,7 +45,7 @@ namespace InstaSearch.Services
                 // Show most recently selected files when query is empty
                 // Use heap-based selection for O(n log k) instead of O(n log n) full sort
                 rankedFiles = SelectTopN(
-                    files.Where(f => history.GetSelectionCount(f.FullPath) > 0),
+                    files.Where(f => history.GetSelectionCount(f.FullPath) > 0 && !IsExcludedByPattern(f.FileNameLower)),
                     f => new RankedFile(f, history.GetSelectionCount(f.FullPath), false, IsCodeFile(f.FileName)),
                     maxResults);
 
@@ -71,7 +72,7 @@ namespace InstaSearch.Services
 
                 // Use heap-based selection for O(n log k) instead of O(n log n) full sort
                 rankedFiles = SelectTopN(
-                    files.Where(f => wildcardPattern.Matches(f.FileNameLower)),
+                    files.Where(f => wildcardPattern.Matches(f.FileNameLower) && !IsExcludedByPattern(f.FileNameLower)),
                     f => new RankedFile(f, history.GetSelectionCount(f.FullPath), wildcardPattern.StartsWithFirstSegment(f.FileNameLower), IsCodeFile(f.FileName)),
                     maxResults);
             }
@@ -79,7 +80,7 @@ namespace InstaSearch.Services
             {
                 // Use heap-based selection for O(n log k) instead of O(n log n) full sort
                 rankedFiles = SelectTopN(
-                    files.Where(f => f.FileNameLower.IndexOf(queryLower, StringComparison.Ordinal) >= 0),
+                    files.Where(f => f.FileNameLower.IndexOf(queryLower, StringComparison.Ordinal) >= 0 && !IsExcludedByPattern(f.FileNameLower)),
                     f => new RankedFile(f, history.GetSelectionCount(f.FullPath), f.FileNameLower.StartsWith(queryLower, StringComparison.Ordinal), IsCodeFile(f.FileName)),
                     maxResults);
             }
@@ -165,8 +166,53 @@ namespace InstaSearch.Services
         /// </summary>
         private static bool IsCodeFile(string fileName)
         {
-            var extension = System.IO.Path.GetExtension(fileName);
+            var extension = Path.GetExtension(fileName);
             return !_binaryExtensions.Contains(extension);
+        }
+
+        /// <summary>
+        /// Checks if a file should be excluded based on user-configured ignored file patterns.
+        /// Patterns support simple wildcards (e.g., *.designer.cs).
+        /// </summary>
+        private bool IsExcludedByPattern(string fileNameLower)
+        {
+            IReadOnlyList<string> patterns = getIgnoredFilePatterns?.Invoke();
+            if (patterns == null || patterns.Count == 0)
+            {
+                return false;
+            }
+
+            foreach (var pattern in patterns)
+            {
+                if (MatchesSimplePattern(fileNameLower, pattern))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Matches a filename against a simple pattern with leading wildcard (e.g., *.designer.cs).
+        /// Supports patterns like: *.ext, *.suffix.ext, exact.name
+        /// </summary>
+        private static bool MatchesSimplePattern(string fileNameLower, string pattern)
+        {
+            if (pattern.Length == 0)
+            {
+                return false;
+            }
+
+            if (pattern[0] == '*')
+            {
+                // *.designer.cs -> check if filename ends with ".designer.cs"
+                var suffix = pattern.Substring(1);
+                return fileNameLower.EndsWith(suffix, StringComparison.Ordinal);
+            }
+
+            // Exact match
+            return fileNameLower.Equals(pattern, StringComparison.Ordinal);
         }
 
         /// <summary>

@@ -28,6 +28,17 @@ namespace InstaSearch.Options
         [DefaultValue(_defaultIgnoredFolders)]
         public string IgnoredFolders { get; set; } = _defaultIgnoredFolders;
 
+        /// <summary>
+        /// Default file patterns to exclude from search results.
+        /// </summary>
+        private const string _defaultIgnoredFilePatterns = "*.designer.cs, *.g.cs, *.g.i.cs, *.generated.cs, *.AssemblyInfo.cs";
+
+        [Category("Search")]
+        [DisplayName("Ignored File Patterns")]
+        [Description("Comma-separated list of file name patterns to exclude from search results (e.g., *.designer.cs, *.g.cs). Supports wildcards (*). Changes take effect on next search.")]
+        [DefaultValue(_defaultIgnoredFilePatterns)]
+        public string IgnoredFilePatterns { get; set; } = _defaultIgnoredFilePatterns;
+
         [Category("Search")]
         [DisplayName("Take over Go To All")]
         [Description("When true, this setting will take over Ctrl+T and Ctrl+P for the built in Go To All command.")]
@@ -77,5 +88,28 @@ namespace InstaSearch.Options
 
             return folders;
         }
+            /// <summary>
+            /// Parses the IgnoredFilePatterns string into a list of lowercase patterns.
+            /// </summary>
+            public IReadOnlyList<string> GetIgnoredFilePatternsList()
+            {
+                var patterns = new List<string>();
+
+                if (string.IsNullOrWhiteSpace(IgnoredFilePatterns))
+                {
+                    return patterns;
+                }
+
+                foreach (var pattern in IgnoredFilePatterns.Split(','))
+                {
+                    var trimmed = pattern.Trim();
+                    if (!string.IsNullOrEmpty(trimmed))
+                    {
+                        patterns.Add(trimmed.ToLowerInvariant());
+                    }
+                }
+
+                return patterns;
+            }
+        }
     }
-}

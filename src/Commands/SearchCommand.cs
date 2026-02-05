@@ -16,11 +16,12 @@ namespace InstaSearch
         // Note: The lambda defers reading options until indexing occurs, ensuring fresh values
         private static readonly FileIndexer _indexer = new(GetIgnoredFolders);
         private static readonly SearchHistoryService _history = new();
-        private static readonly SearchService _searchService = new(_indexer, _history);
+        private static readonly SearchService _searchService = new(_indexer, _history, GetIgnoredFilePatterns);
         private static readonly SearchRootResolver _rootResolver = new();
         private static RatingPrompt _ratingPrompt;
 
         private static HashSet<string> GetIgnoredFolders() => General.Instance.GetIgnoredFoldersSet();
+        private static IReadOnlyList<string> GetIgnoredFilePatterns() => General.Instance.GetIgnoredFilePatternsList();
 
         // Track the open dialog instance to prevent multiple windows
         private static SearchDialog _openDialog;

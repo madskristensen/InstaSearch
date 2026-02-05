@@ -84,10 +84,11 @@ The resulting file list is cached in memory. Subsequent searches reuse this cach
 
 Configure InstaSearch via **Tools > Options > InstaSearch > General**:
 
-| Setting             | Description                                                                      |
-| ------------------- | -------------------------------------------------------------------------------- |
-| Ignored Folders     | Comma-separated list of folder names to exclude from indexing.                   |
-| Take over Go To All | When enabled, `Ctrl+T` and `Ctrl+,` will open Insta Search instead of Go To All. |
+| Setting               | Description                                                                                                 |
+| --------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Ignored Folders       | Comma-separated list of folder names to exclude from indexing.                                              |
+| Ignored File Patterns | Comma-separated file name patterns to exclude from results (e.g., `*.designer.cs`). Supports `*` wildcards. |
+| Take over Go To All   | When enabled, `Ctrl+T` and `Ctrl+,` will open Insta Search instead of Go To All.                            |
 
 Changes to ignored folders take effect on the next search (the index is automatically refreshed).
 
