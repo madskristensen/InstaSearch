@@ -4,9 +4,7 @@
     <Platform Name="arm64" />
     <Platform Name="x86" />
   </Configurations>
-  <Folder Name="/benchmarks/">
-    <Project Path="benchmarks/InstaSearch.Benchmarks.csproj" />
-  </Folder>
+  <Project Path="benchmarks/InstaSearch.Benchmarks.csproj" />
   <Project Path="src/InstaSearch.csproj" Id="dfb9ad64-9668-446b-b1d0-4458ee21a125">
     <Platform Solution="*|arm64" Project="arm64" />
     <Platform Solution="*|x86" Project="x86" />

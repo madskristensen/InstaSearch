@@ -4,6 +4,8 @@
         <Identity Id="InstaSearch.afd12677-0927-4942-840a-ceff4044fc02" Version="1.0" Language="en-US" Publisher="Mads Kristensen" />
         <DisplayName>Insta Search</DisplayName>
         <Description xml:space="preserve">The fastest file search for Visual Studio. Searches the entire repo folder and not just the files in the solution and projects</Description>
+        <MoreInfo>https://github.com/madskristensen/InstaSearch/</MoreInfo>
+        <License>Resources\LICENSE.txt</License>
         <Icon>Resources\Icon.png</Icon>
         <PreviewImage>Resources\Icon.png</PreviewImage>
     </Metadata>

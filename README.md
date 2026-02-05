@@ -4,7 +4,7 @@
 
 # Insta Search - Quick File Search for Visual Studio
 
-[![Build](https://github.com/madskristensen/InstaSearch/actions/workflows/build.yaml/badge.svg)](https://github.com/madskristensen/Insta Search/actions/workflows/build.yaml)
+[![Build](https://github.com/madskristensen/InstaSearch/actions/workflows/build.yaml/badge.svg)](https://github.com/madskristensen/InstaSearch/actions/workflows/build.yaml)
 ![GitHub Sponsors](https://img.shields.io/github/sponsors/madskristensen)
 
 Download this extension from the [Visual Studio Marketplace][marketplace]
