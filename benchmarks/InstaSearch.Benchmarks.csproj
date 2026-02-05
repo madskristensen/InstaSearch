@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Optimize>true</Optimize>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" Version="0.14.0" />
+    <!-- Explicit versions to resolve MSB3277 assembly binding conflicts -->
+    <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.0.0" />
+    <PackageReference Include="System.Reflection.Metadata" Version="8.0.0" />
+  </ItemGroup>
+
+  <!-- Reference source files directly to avoid VS SDK dependencies -->
+  <ItemGroup>
+    <Compile Include="..\src\Services\FileIndexer.cs" Link="Services\FileIndexer.cs" />
+  </ItemGroup>
+</Project>
