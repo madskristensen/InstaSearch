@@ -42,7 +42,7 @@ namespace InstaSearch.Options
 
         [Category("Search")]
         [DisplayName("Take over Go To All")]
-        [Description("When true, this setting will take over Ctrl+T and Ctrl+P for the built in Go To All command.")]
+        [Description("When true, this setting will take over Ctrl+T and Ctrl+, for the built in Go To All command.")]
         [DefaultValue(true)]
         public bool TakeOverGoToAll { get; set; } = true;
 

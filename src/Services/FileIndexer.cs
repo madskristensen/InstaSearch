@@ -59,8 +59,8 @@ namespace InstaSearch.Services
         }
 
         /// <summary>
-        /// Indexes all files under the given root directory using parallel enumeration.
-        /// Results are cached per root directory and kept up-to-date via FileSystemWatcher.
+        /// Indexes all files under the given root directory using parallel enumeration. Results are cached per root
+        /// directory and kept up-to-date via FileSystemWatcher.
         /// </summary>
         public async Task<IReadOnlyList<FileEntry>> IndexAsync(string rootPath, CancellationToken cancellationToken = default)
         {
@@ -280,6 +280,7 @@ namespace InstaSearch.Services
             if (_disposed)
                 return;
 
+            GC.SuppressFinalize(this);
             _disposed = true;
             StopAllWatching();
             _cache.Clear();
@@ -300,7 +301,7 @@ namespace InstaSearch.Services
             var pendingCount = 1; // Track outstanding work items
             var directories = new BlockingCollection<string>
             {
-                rootPath
+                { rootPath, cancellationToken }
             };
 
             // Use a fixed thread pool for continuous work-stealing
@@ -327,7 +328,7 @@ namespace InstaSearch.Services
                                 if (!ignoredFilter.IsIgnored(dirName))
                                 {
                                     Interlocked.Increment(ref pendingCount);
-                                    directories.Add(subDir);
+                                    directories.Add(subDir, cancellationToken);
                                 }
                             }
 
@@ -409,8 +410,8 @@ namespace InstaSearch.Services
         }
 
         /// <summary>
-        /// Matches a folder name against a simple wildcard pattern (e.g., *.Migrations).
-        /// Supports leading wildcard: *.suffix
+        /// Matches a folder name against a simple wildcard pattern (e.g., *.Migrations). Supports leading wildcard:
+        /// *.suffix
         /// </summary>
         private static bool MatchesWildcard(string folderName, string pattern)
         {

@@ -86,26 +86,31 @@ namespace InstaSearch.UI
             }
         }
 
-        private async void SearchDialog_Loaded(object sender, RoutedEventArgs e)
+        private void SearchDialog_Loaded(object sender, RoutedEventArgs e)
         {
             SearchTextBox.Focus();
 
             // Trigger initial search to show history items
-            await PerformSearchAsync(string.Empty);
+            PerformSearchAsync(string.Empty).FireAndForget();
         }
 
         private void SearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
         {
+            // Toggle placeholder visibility
+            PlaceholderText.Visibility = string.IsNullOrEmpty(SearchTextBox.Text)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+
             // Debounce: restart timer on each keystroke
             _pendingQuery = SearchTextBox.Text;
             _debounceTimer.Stop();
             _debounceTimer.Start();
         }
 
-        private async void DebounceTimer_Tick(object sender, EventArgs e)
+        private void DebounceTimer_Tick(object sender, EventArgs e)
         {
             _debounceTimer.Stop();
-            await PerformSearchAsync(_pendingQuery);
+            PerformSearchAsync(_pendingQuery).FireAndForget();
         }
 
         /// <summary>
@@ -305,17 +310,18 @@ namespace InstaSearch.UI
             }
         }
 
-        private async void OpenFileWithoutClosing()
+        private void OpenFileWithoutClosing()
         {
             if (ResultsListBox.SelectedItem is SearchResult result)
             {
                 try
                 {
-                    await VS.Documents.OpenAsync(result.FullPath);
-                    await _searchService.RecordSelectionAsync(result.FullPath);
+                    VS.Documents.OpenAsync(result.FullPath).FireAndForget();
+                    _searchService.RecordSelectionAsync(result.FullPath).FireAndForget();
                 }
                 catch (Exception ex)
                 {
+                    ex.Log();
                     StatusText.Text = $"Error opening file: {ex.Message}";
                 }
             }
@@ -332,11 +338,11 @@ namespace InstaSearch.UI
             SearchTextBox.Focus();
         }
 
-        private async void RefreshLink_Click(object sender, RoutedEventArgs e)
+        private void RefreshLink_Click(object sender, RoutedEventArgs e)
         {
             // Invalidate cache and re-search
             _searchService.RefreshIndex(_rootPath);
-            await PerformSearchAsync(SearchTextBox.Text);
+            PerformSearchAsync(SearchTextBox.Text).FireAndForget();
             SearchTextBox.Focus();
         }
 

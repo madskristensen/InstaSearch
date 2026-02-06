@@ -112,6 +112,18 @@
                                  Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"
                                  CaretBrush="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"
                                  TextChanged="SearchTextBox_TextChanged"/>
+
+                        <!-- Placeholder text shown when search box is empty -->
+                        <TextBlock x:Name="PlaceholderText"
+                                   Grid.Column="1"
+                                   Text="Search files (use .ext -.ext \path\ to filter)"
+                                   FontSize="14"
+                                   Padding="2"
+                                   Margin="4,0,0,0"
+                                   VerticalAlignment="Center"
+                                   IsHitTestVisible="False"
+                                   Opacity="0.5"
+                                   Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"/>
                     </Grid>
                 </Border>
             </Border>

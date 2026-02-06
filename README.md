@@ -1,6 +1,6 @@
 [marketplace]: <https://marketplace.visualstudio.com/items?itemName=MadsKristensen.InstaSearch>
 [vsixgallery]: <http://vsixgallery.com/extension/InstaSearch.5164fa67-5caa-4d84-9087-bbaedc2a5539/>
-[repo]: <https://github.com/madskristensen/Insta Search>
+[repo]: <https://github.com/madskristensen/InstaSearch>
 
 # Insta Search - Quick File Search for Visual Studio
 

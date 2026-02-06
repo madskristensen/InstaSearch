@@ -70,41 +70,43 @@ namespace InstaSearch
             dialog.ShowDialog();
         }
 
-        private static async void OnFilesSelected(object sender, FilesSelectedEventArgs e)
+        private static void OnFilesSelected(object sender, FilesSelectedEventArgs e)
         {
-            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-            try
+            _ = ThreadHelper.JoinableTaskFactory.StartOnIdle(async () =>
             {
-                IReadOnlyList<SearchResult> selectedFiles = e.SelectedFiles;
-                var lineNumber = e.LineNumber;
-
-                // Open all selected files
-                DocumentView lastDocumentView = null;
-                foreach (SearchResult file in selectedFiles)
+                try
                 {
-                    // Record the selection for history
-                    await _searchService.RecordSelectionAsync(file.FullPath);
+                    IReadOnlyList<SearchResult> selectedFiles = e.SelectedFiles;
+                    var lineNumber = e.LineNumber;
 
-                    // Open the file in VS
-                    lastDocumentView = await VS.Documents.OpenAsync(file.FullPath);
+                    // Open all selected files
+                    DocumentView lastDocumentView = null;
+                    foreach (SearchResult file in selectedFiles)
+                    {
+                        // Record the selection for history
+                        await _searchService.RecordSelectionAsync(file.FullPath);
+
+                        // Open the file in VS
+                        lastDocumentView = await VS.Documents.OpenAsync(file.FullPath);
+                    }
+
+                    // Navigate to specific line in the last opened file (typically the first selected)
+                    // Line number only applies when a single file is selected
+                    if (lineNumber.HasValue && selectedFiles.Count == 1 && lastDocumentView?.TextView != null)
+                    {
+                        await NavigateToLineAsync(lastDocumentView.TextView, lineNumber.Value);
+                    }
+
+                    // Register successful usage for rating prompt
+                    _ratingPrompt ??= new RatingPrompt("MadsKristensen.InstaSearch", Vsix.Name, await General.GetLiveInstanceAsync());
+                    _ratingPrompt.RegisterSuccessfulUsage();
                 }
-
-                // Navigate to specific line in the last opened file (typically the first selected)
-                // Line number only applies when a single file is selected
-                if (lineNumber.HasValue && selectedFiles.Count == 1 && lastDocumentView?.TextView != null)
+                catch (Exception ex)
                 {
-                    await NavigateToLineAsync(lastDocumentView.TextView, lineNumber.Value);
+                    await VS.StatusBar.ShowMessageAsync($"Error opening file: {ex.Message}");
+                    await ex.LogAsync();
                 }
-
-                // Register successful usage for rating prompt
-                _ratingPrompt ??= new RatingPrompt("MadsKristensen.InstaSearch", Vsix.Name, await General.GetLiveInstanceAsync());
-                _ratingPrompt.RegisterSuccessfulUsage();
-            }
-            catch (Exception ex)
-            {
-                await VS.StatusBar.ShowMessageAsync($"Error opening file: {ex.Message}");
-            }
+            });
         }
 
         /// <summary>
