@@ -25,6 +25,7 @@ A fast, lightweight file search dialog for Visual Studio. Instantly find and ope
 - **File icons** - Visual Studio file icons for easy identification
 - **Keyboard-driven** - Navigate entirely with keyboard
 - **VS themed** - Follows your Visual Studio light/dark theme
+- **Recent solutions** - Search and open recent solutions/folders when no workspace is open
 
 ## Usage
 
@@ -81,6 +82,12 @@ Append `:lineNumber` to your search query to jump directly to a specific line af
 ### Multi-Select
 
 Hold `Ctrl` while clicking to select multiple files, or hold `Shift` to select a range. You can also use `Shift+Arrow` keys to extend your selection from the keyboard. Press `Enter` to open all selected files at once.
+
+### Recent Solutions & Folders
+
+When no solution or folder is open in Visual Studio, invoking Insta Search shows a list of your most recently opened solutions and folders instead. The list is pulled from Visual Studio's own MRU store, so it matches what you see on the Start Window.
+
+Type to filter the list by name or path, then press `Enter` to open the selected item. Solutions (`.sln`, `.slnx`) and project files are opened as solutions, while folders are opened via Open Folder.
 
 ## How It Works
 
