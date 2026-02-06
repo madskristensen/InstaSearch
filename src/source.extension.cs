@@ -10,7 +10,7 @@ namespace InstaSearch
     {
         public const string Id = "InstaSearch.afd12677-0927-4942-840a-ceff4044fc02";
         public const string Name = "Insta Search";
-        public const string Description = @"The fastest file search for Visual Studio. Searches the entire repo folder and not just the files in the solution and projects";
+        public const string Description = @"The fastest file search for Visual Studio. Searches the entire repo folder and not just the files in the solution and projects. Invoke by hitting Shift+Shift";
         public const string Language = "en-US";
         public const string Version = "1.0";
         public const string Author = "Mads Kristensen";

@@ -22,11 +22,7 @@
     </Buttons>
   </Commands>
 
-  <KeyBindings>
-    <KeyBinding guid="InstaSearch" id="SearchCommand" mod1="Alt" key1="VK_SPACE" editor="guidVSStd97"/>
-  </KeyBindings>
-
-  <Symbols>    
+  <Symbols>
     <GuidSymbol name="InstaSearch" value="{57177298-f907-4522-a5c9-3a2d120fed94}">
       <IDSymbol name="SearchCommand" value="0x0100" />
     </GuidSymbol>

@@ -28,9 +28,7 @@ A fast, lightweight file search dialog for Visual Studio. Instantly find and ope
 
 ## Usage
 
-Press `Alt+Space` to open the search dialog (or find it under **Edit > File Search**).
-
-You can also **double-tap Shift** (press shift twice quickly) as an alternative way to open the search dialog.
+**Double-tap Shift** (press Shift twice quickly) to open the search dialog. You can also find it under **Edit > File Search**.
 
 ### Search Patterns
 
@@ -70,7 +68,6 @@ Append `:lineNumber` to your search query to jump directly to a specific line af
 
 | Key                       | Action                         |
 | ------------------------- | ------------------------------ |
-| `Alt+Space`               | Open Insta Search              |
 | **`Shift` + `Shift`**     | **Open Insta Search**          |
 | `Up` / `Down`             | Navigate results               |
 | `Shift+Up` / `Shift+Down` | Extend selection               |
