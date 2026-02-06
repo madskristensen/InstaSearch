@@ -51,6 +51,8 @@
     <Compile Include="Options\OptionsProvider.cs" />
     <Compile Include="Services\FileEntry.cs" />
     <Compile Include="Services\FileIndexer.cs" />
+    <Compile Include="Services\MruItem.cs" />
+    <Compile Include="Services\MruService.cs" />
     <Compile Include="Services\SearchHistoryService.cs" />
     <Compile Include="Services\SearchQuery.cs" />
     <Compile Include="Services\SearchResult.cs" />
@@ -59,6 +61,9 @@
     <Compile Include="Services\WildcardPattern.cs" />
     <Compile Include="UI\FilesSelectedEventArgs.cs" />
     <Compile Include="UI\HighlightTextBlock.cs" />
+    <Compile Include="UI\MruSearchDialog.xaml.cs">
+      <DependentUpon>MruSearchDialog.xaml</DependentUpon>
+    </Compile>
     <Compile Include="UI\SearchDialog.xaml.cs">
       <DependentUpon>SearchDialog.xaml</DependentUpon>
     </Compile>
@@ -120,6 +125,9 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
+    <Page Include="UI\MruSearchDialog.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
     <Page Include="UI\SearchDialog.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>

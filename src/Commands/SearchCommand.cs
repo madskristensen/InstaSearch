@@ -18,6 +18,7 @@ namespace InstaSearch
         private static readonly SearchHistoryService _history = new();
         private static readonly SearchService _searchService = new(_indexer, _history, GetIgnoredFilePatterns);
         private static readonly SearchRootResolver _rootResolver = new();
+        private static readonly MruService _mruService = new();
         private static RatingPrompt _ratingPrompt;
 
         private static IgnoredFolderFilter GetIgnoredFolders() => General.Instance.GetIgnoredFolderFilter();
@@ -34,7 +35,8 @@ namespace InstaSearch
             var rootPath = await _rootResolver.GetSearchRootAsync();
             if (string.IsNullOrEmpty(rootPath))
             {
-                await VS.StatusBar.ShowMessageAsync("No solution, folder, or repository is open. Please open a solution or folder first.");
+                // No workspace open — show MRU search instead
+                await ShowMruSearchDialogAsync();
                 return;
             }
 
@@ -68,6 +70,62 @@ namespace InstaSearch
             _openDialog = dialog;
 
             dialog.ShowDialog();
+        }
+
+        /// <summary>
+        /// Shows the MRU search dialog for recently opened solutions and folders.
+        /// </summary>
+        private static async Task ShowMruSearchDialogAsync()
+        {
+            IReadOnlyList<MruItem> mruItems = await _mruService.GetMruItemsAsync();
+            if (mruItems.Count == 0)
+            {
+                await VS.StatusBar.ShowMessageAsync("No recent solutions or folders found.");
+                return;
+            }
+
+            Window mainWindow = Application.Current.MainWindow;
+            var dialog = new MruSearchDialog(mruItems);
+
+            if (mainWindow != null)
+            {
+                dialog.Owner = mainWindow;
+            }
+
+            dialog.Topmost = true;
+
+            if (dialog.ShowDialog() == true && dialog.SelectedItem != null)
+            {
+                MruItem selected = dialog.SelectedItem;
+                OpenMruItemAsync(selected).FireAndForget();
+            }
+        }
+
+        /// <summary>
+        /// Opens the selected MRU item (solution or folder) in Visual Studio.
+        /// </summary>
+        private static async Task OpenMruItemAsync(MruItem item)
+        {
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+            try
+            {
+                if (item.Kind == MruItemKind.Folder)
+                {
+                    var solution = await VS.GetServiceAsync<SVsSolution, IVsSolution7>();
+                    solution?.OpenFolder(item.FullPath);
+                }
+                else
+                {
+                    var dte = await VS.GetServiceAsync<EnvDTE.DTE, EnvDTE80.DTE2>();
+                    dte?.Solution.Open(item.FullPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                await VS.StatusBar.ShowMessageAsync($"Error opening: {ex.Message}");
+                await ex.LogAsync();
+            }
         }
 
         private static void OnFilesSelected(object sender, FilesSelectedEventArgs e)

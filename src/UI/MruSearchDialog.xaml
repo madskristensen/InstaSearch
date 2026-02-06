@@ -1,0 +1,204 @@
+<Window x:Class="InstaSearch.UI.MruSearchDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vs="clr-namespace:Microsoft.VisualStudio.PlatformUI;assembly=Microsoft.VisualStudio.Shell.15.0"
+        xmlns:imaging="clr-namespace:Microsoft.VisualStudio.Imaging;assembly=Microsoft.VisualStudio.Imaging"
+        xmlns:theming="clr-namespace:Microsoft.VisualStudio.PlatformUI;assembly=Microsoft.VisualStudio.Imaging"
+        xmlns:catalog="clr-namespace:Microsoft.VisualStudio.Imaging;assembly=Microsoft.VisualStudio.ImageCatalog"
+        Title="InstaSearch - Recent Solutions &amp; Folders"
+        WindowStartupLocation="CenterOwner"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        ShowInTaskbar="False"
+        ResizeMode="CanResizeWithGrip"
+        MinWidth="400"
+        MinHeight="250"
+        MaxWidth="1200"
+        MaxHeight="800"
+        Width="600"
+        Height="400"
+        Background="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowBackgroundBrushKey}}"
+        theming:ImageThemingUtilities.ImageBackgroundColor="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowBackgroundColorKey}}"
+        PreviewKeyDown="Window_PreviewKeyDown">
+
+    <Window.Resources>
+        <!-- Reuse same VS-themed ListBox item style -->
+        <Style x:Key="MruItemStyle" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="6,4"/>
+            <Setter Property="BorderThickness" Value="2,0,0,0"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" 
+                                        Value="{DynamicResource {x:Static vs:EnvironmentColors.CommandBarSelectedBrushKey}}"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" 
+                                        Value="{DynamicResource {x:Static vs:EnvironmentColors.FileTabSelectedBorderBrushKey}}"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" 
+                                        Value="{DynamicResource {x:Static vs:EnvironmentColors.CommandBarMouseOverBackgroundGradientBrushKey}}"/>
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsSelected" Value="True"/>
+                                    <Condition Property="IsMouseOver" Value="True"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="Bd" Property="Background" 
+                                        Value="{DynamicResource {x:Static vs:EnvironmentColors.CommandBarHoverOverSelectedBrushKey}}"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" 
+                                        Value="{DynamicResource {x:Static vs:EnvironmentColors.FileTabSelectedBorderBrushKey}}"/>
+                            </MultiTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border BorderBrush="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowBorderBrushKey}}"
+            BorderThickness="1"
+            ClipToBounds="True">
+        <Grid Margin="0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Search Box -->
+            <Border Grid.Row="0"
+                    Background="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowBackgroundBrushKey}}"
+                    BorderBrush="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                    BorderThickness="0,0,0,1"
+                    Padding="8,6">
+                <Border Background="{DynamicResource {x:Static vs:EnvironmentColors.SearchBoxBackgroundBrushKey}}"
+                        BorderBrush="{DynamicResource {x:Static vs:EnvironmentColors.SearchBoxBorderBrushKey}}"
+                        BorderThickness="1"
+                        Padding="4,2">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <imaging:CrispImage Grid.Column="0"
+                                            Moniker="{x:Static catalog:KnownMonikers.Search}"
+                                            Width="16"
+                                            Height="16"
+                                            VerticalAlignment="Center"
+                                            Margin="2,0,6,0"/>
+
+                        <TextBox x:Name="SearchTextBox"
+                                 Grid.Column="1"
+                                 FontSize="14"
+                                 Padding="2"
+                                 BorderThickness="0"
+                                 Background="Transparent"
+                                 Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                 CaretBrush="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                 TextChanged="SearchTextBox_TextChanged"/>
+
+                        <TextBlock x:Name="PlaceholderText"
+                                   Grid.Column="1"
+                                   Text="Search recent solutions and folders"
+                                   FontSize="14"
+                                   Padding="2"
+                                   Margin="4,0,0,0"
+                                   VerticalAlignment="Center"
+                                   IsHitTestVisible="False"
+                                   Opacity="0.5"
+                                   Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"/>
+                    </Grid>
+                </Border>
+            </Border>
+
+            <!-- Results List -->
+            <ListBox x:Name="ResultsListBox"
+                     Grid.Row="1"
+                     BorderThickness="0"
+                     Background="Transparent"
+                     SelectionMode="Single"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     ScrollViewer.CanContentScroll="True"
+                     VirtualizingStackPanel.IsVirtualizing="True"
+                     VirtualizingStackPanel.VirtualizationMode="Recycling"
+                     ItemContainerStyle="{StaticResource MruItemStyle}"
+                     MouseDoubleClick="ResultsListBox_MouseDoubleClick"
+                     SelectionChanged="ResultsListBox_SelectionChanged"
+                     Margin="0,2,0,0">
+                <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <VirtualizingStackPanel />
+                    </ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Margin="4,1,0,1">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <imaging:CrispImage Grid.Column="0" 
+                                                Moniker="{Binding Moniker, Mode=OneTime}" 
+                                                Width="16" 
+                                                Height="16" 
+                                                Margin="0,2,8,0"
+                                                VerticalAlignment="Top"/>
+
+                            <StackPanel Grid.Column="1" Orientation="Vertical">
+                                <TextBlock Text="{Binding DisplayName, Mode=OneTime}"
+                                           FontSize="13"
+                                           Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"/>
+                                <TextBlock Text="{Binding FullPath, Mode=OneTime}" 
+                                           FontSize="10"
+                                           Opacity="0.55"
+                                           Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"
+                                           TextTrimming="CharacterEllipsis"
+                                           Margin="0,1,0,0"/>
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <!-- Status Bar -->
+            <Border Grid.Row="2"
+                    BorderBrush="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                    BorderThickness="0,1,0,0"
+                    Padding="10,4">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="StatusText"
+                               Grid.Column="0"
+                               FontSize="11"
+                               VerticalAlignment="Center"
+                               Opacity="0.7"
+                               Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"/>
+
+                    <TextBlock Grid.Column="1"
+                               FontSize="11"
+                               VerticalAlignment="Center"
+                               Opacity="0.5"
+                               Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"
+                               Text="Enter Open · Esc Close"/>
+                </Grid>
+            </Border>
+        </Grid>
+    </Border>
+</Window>
