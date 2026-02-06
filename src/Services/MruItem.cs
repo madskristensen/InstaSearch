@@ -5,26 +5,17 @@ namespace InstaSearch.Services
     /// <summary>
     /// Represents a recently opened solution or folder from the VS MRU list.
     /// </summary>
-    public class MruItem
+    public class MruItem(string fullPath, string displayName, MruItemKind kind, ImageMoniker moniker)
     {
-        public string FullPath { get; }
-        public string DisplayName { get; }
-        public MruItemKind Kind { get; }
-        public ImageMoniker Moniker { get; }
+        public string FullPath { get; } = fullPath;
+        public string DisplayName { get; } = displayName;
+        public MruItemKind Kind { get; } = kind;
+        public ImageMoniker Moniker { get; } = moniker;
 
         /// <summary>
         /// Lowercase display name for case-insensitive matching.
         /// </summary>
-        public string DisplayNameLower { get; }
-
-        public MruItem(string fullPath, string displayName, MruItemKind kind, ImageMoniker moniker)
-        {
-            FullPath = fullPath;
-            DisplayName = displayName;
-            Kind = kind;
-            Moniker = moniker;
-            DisplayNameLower = displayName.ToLowerInvariant();
-        }
+        public string DisplayNameLower { get; } = displayName.ToLowerInvariant();
     }
 
     /// <summary>

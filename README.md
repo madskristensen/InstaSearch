@@ -89,6 +89,8 @@ When no solution or folder is open in Visual Studio, invoking Insta Search shows
 
 Type to filter the list by name or path, then press `Enter` to open the selected item. Solutions (`.sln`, `.slnx`) and project files are opened as solutions, while folders are opened via Open Folder.
 
+![Mru](art/mru.png)
+
 ## How It Works
 
 Insta Search maintains an in-memory index of all files in your workspace. The index is built once when you first open the search dialog, then kept up to date automatically.
@@ -147,7 +149,7 @@ Space-separated modifiers (`.ext`, `-.ext`, `\folder\`) are parsed out of the qu
 Results are ranked by:
 
 1. History score (files you have opened before are ranked higher)
-2. File type (code/text files are prioritized over binary files like images, executables, etc.)
+2. File type (commonly edited file types like `.cs`, `.json`, `.xaml`, `.js` are prioritized)
 3. Exact match (query matches filename with or without extension, e.g., `dialog` → `Dialog.cs`)
 4. Whether the filename starts with your query
 5. Shorter filenames first (closer matches where the query covers more of the name)
@@ -157,7 +159,14 @@ Only the top 100 results are returned. File icons are fetched only for these fin
 
 ### History
 
-InstaSearch tracks which files you open and how often. This history is stored per-workspace in the `.vs/InstaSearch` folder within your repository (the `.vs` folder is typically gitignored). When you open the search dialog with an empty query, your most frequently opened files are shown. When you type a query, files you have opened before are ranked higher in the results.
+Insta Search tracks which files you open and how often. This history is stored per-workspace in the `.vs/InstaSearch` folder within your repository (the `.vs` folder is typically gitignored). When you open the search dialog with an empty query, your most frequently opened files are shown. When you type a query, files you have opened before are ranked higher in the results.
+
+To reset the history and cache for a workspace, delete the `.vs/InstaSearch` folder:
+
+```text
+.vs/
+ └── InstaSearch/   ← delete this folder to reset
+```
 
 ## Performance
 

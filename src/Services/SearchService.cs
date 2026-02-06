@@ -134,25 +134,40 @@ namespace InstaSearch.Services
         }
 
         /// <summary>
-        /// File extensions that are typically not edited in VS (binary, media, etc.).
-        /// These will be deprioritized in search results.
+        /// File extensions most commonly opened and edited in Visual Studio, ordered by frequency.
+        /// Used to prioritize code/text files over binary or uncommon files in search results.
+        /// Derived from telemetry of the top ~60 most frequently opened extensions.
         /// </summary>
-        private static readonly HashSet<string> _binaryExtensions = new(StringComparer.OrdinalIgnoreCase)
+        private static readonly HashSet<string> _codeExtensions = new(StringComparer.OrdinalIgnoreCase)
         {
-            // Images
-            ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".svg", ".webp", ".tiff", ".tif",
-            // Video/Audio
-            ".mp4", ".avi", ".mov", ".wmv", ".mp3", ".wav", ".ogg", ".flac",
-            // Executables/Binaries
-            ".exe", ".dll", ".pdb", ".obj", ".lib", ".so", ".dylib",
-            // Archives
-            ".zip", ".7z", ".rar", ".tar", ".gz", ".nupkg",
-            // Fonts
-            ".ttf", ".otf", ".woff", ".woff2", ".eot",
-            // Documents (typically not edited in VS)
-            ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-            // Other binary
-            ".bin", ".dat", ".db", ".sqlite", ".mdb"
+            // Source code
+            ".cs", ".cpp", ".h", ".vb", ".c", ".hpp", ".cc", ".cxx", ".inl", ".asm",
+            ".js", ".ts", ".tsx", ".jsx", ".vue",
+            ".py", ".php", ".f90",
+            // Web / markup
+            ".cshtml", ".razor", ".aspx", ".ascx", ".master", ".html", ".htm", ".asp",
+            ".xaml", ".axaml",
+            ".css", ".scss", ".less",
+            // Data / config
+            ".json", ".xml", ".yml", ".yaml", ".config", ".ini", ".csv",
+            ".sql", ".proto", ".xsd", ".env",
+            // Project / build
+            ".csproj", ".vbproj", ".vcxproj", ".sqlproj", ".sln",
+            ".props", ".targets", ".pubxml",
+            // Text / docs
+            ".txt", ".md", ".log",
+            ".resx", ".settings", ".editorconfig",
+            // Templates / codegen
+            ".tt", ".rdl", ".rdlc",
+            // Scripting / shell
+            ".ps1", ".sh", ".bat",
+            // Other VS-editable
+            ".feature", ".http", ".gitignore",
+            ".shader", ".hlsl",
+            ".dtsx", ".edmx", ".wxs",
+            ".manifest", ".map",
+            ".ashx", ".asax",
+            ".rc", ".svg",
         };
 
         /// <summary>
@@ -222,12 +237,12 @@ namespace InstaSearch.Services
         }
 
         /// <summary>
-        /// Checks if a file is a code/text file (not a binary file like images, executables, etc.).
+        /// Checks if a file is a commonly edited code/text file in Visual Studio.
         /// </summary>
         private static bool IsCodeFile(string fileName)
         {
             var extension = Path.GetExtension(fileName);
-            return !_binaryExtensions.Contains(extension);
+            return _codeExtensions.Contains(extension);
         }
 
         /// <summary>
