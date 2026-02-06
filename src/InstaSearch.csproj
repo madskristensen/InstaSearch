@@ -46,6 +46,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Commands\GoToIntercepter.cs" />
+    <Compile Include="Commands\ShfitShiftIntercepter.cs" />
     <Compile Include="Options\General.cs" />
     <Compile Include="Options\OptionsProvider.cs" />
     <Compile Include="Services\FileEntry.cs" />
