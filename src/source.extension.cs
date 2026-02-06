@@ -14,7 +14,7 @@ namespace InstaSearch
         public const string Language = "en-US";
         public const string Version = "1.0";
         public const string Author = "Mads Kristensen";
-        public const string Tags = "";
+        public const string Tags = "search, file, unlisted";
         public const bool IsPreview = false;
     }
 }
