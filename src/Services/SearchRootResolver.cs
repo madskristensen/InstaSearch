@@ -27,15 +27,9 @@ namespace InstaSearch.Services
             if (!string.IsNullOrEmpty(solutionPath))
             {
                 // Solution path can be pointing to a folder not just a .sln file in Open Folder scenario, so we need to check if it's a directory first
-                if (Directory.Exists(solutionPath))
-                {
-                    solutionDir = solutionPath; // Open Folder scenario where FullPath is a directory
-                }
-                else
-                {
-                    solutionDir = Path.GetDirectoryName(solutionPath);
-                }
-            
+                solutionDir = Directory.Exists(solutionPath)
+                    ? solutionPath // Open Folder scenario where FullPath is a directory
+                    : Path.GetDirectoryName(solutionPath);
                 // Try git repo root first (highest priority)
                 var gitRoot = FindGitRoot(solutionDir);
                 if (gitRoot != null)
