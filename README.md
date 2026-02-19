@@ -60,10 +60,13 @@ Filters can be combined freely: `service \src\ .cs -.designer.cs`
 
 ### Go-to-Line
 
-Append `:lineNumber` to your search query to jump directly to a specific line after opening the file. For example:
+Append a line number (and optional column) to jump directly to a specific location after opening. This syntax makes it easy to paste in a location from an error message. For example:
 
 - `program.cs:100` - Opens program.cs at line 100
 - `test*:25` - Opens the first matching file at line 25
+- `program.cs:100:13` - Line 100, column 13
+- `program.cs(100)` - Line 100
+- `program.cs(100,13)` - Line 100, column 13
 
 ### Keyboard Shortcuts
 
