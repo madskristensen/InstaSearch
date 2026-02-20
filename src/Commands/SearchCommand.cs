@@ -136,6 +136,7 @@ namespace InstaSearch
                 {
                     IReadOnlyList<SearchResult> selectedFiles = e.SelectedFiles;
                     var lineNumber = e.LineNumber;
+                    var columnNumber = e.ColumnNumber;
 
                     // Open all selected files
                     DocumentView lastDocumentView = null;
@@ -148,11 +149,11 @@ namespace InstaSearch
                         lastDocumentView = await VS.Documents.OpenAsync(file.FullPath);
                     }
 
-                    // Navigate to specific line in the last opened file (typically the first selected)
-                    // Line number only applies when a single file is selected
+                    // Navigate to specific line and column in the last opened file (typically the first selected)
+                    // Line/column number only applies when a single file is selected
                     if (lineNumber.HasValue && selectedFiles.Count == 1 && lastDocumentView?.TextView != null)
                     {
-                        await NavigateToLineAsync(lastDocumentView.TextView, lineNumber.Value);
+                        await NavigateToLineAsync(lastDocumentView.TextView, lineNumber.Value, columnNumber);
                     }
 
                     // Register successful usage for rating prompt
@@ -168,11 +169,12 @@ namespace InstaSearch
         }
 
         /// <summary>
-        /// Navigates to a specific line number in the text view.
+        /// Navigates to a specific line and optional column number in the text view.
         /// </summary>
         /// <param name="textView">The text view to navigate in.</param>
         /// <param name="lineNumber">The 1-based line number to navigate to.</param>
-        private static async Task NavigateToLineAsync(IWpfTextView textView, int lineNumber)
+        /// <param name="columnNumber">The 1-based column number to navigate to, or null for beginning of line.</param>
+        private static async Task NavigateToLineAsync(IWpfTextView textView, int lineNumber, int? columnNumber = null)
         {
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
@@ -194,9 +196,16 @@ namespace InstaSearch
                 }
 
                 ITextSnapshotLine line = snapshot.GetLineFromLineNumber(lineIndex);
+                SnapshotPoint caretPosition = line.Start;
 
-                // Move caret to the beginning of the line
-                textView.Caret.MoveTo(line.Start);
+                // Calculate caret position: offset into the line by column if specified, start of line otherwise
+                if (columnNumber.HasValue)
+                {
+                    caretPosition += Math.Max(0, Math.Min(columnNumber.Value - 1, line.Length));
+                }
+
+                // Move caret to the calculated position
+                textView.Caret.MoveTo(caretPosition);
 
                 // Center the line in the view
                 textView.ViewScroller.EnsureSpanVisible(

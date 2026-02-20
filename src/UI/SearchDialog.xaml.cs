@@ -20,8 +20,11 @@ namespace InstaSearch.UI
     {
         private const int _debounceDelayMs = 50;
 
-        // Regex to match :lineNumber at the end of the query (e.g., "file.cs:42")
-        private static readonly Regex _lineNumberPattern = new(@":(\d+)$", RegexOptions.Compiled);
+        // Regex to match :lineNumber or :lineNumber:columnNumber at the end of the query (e.g., "file.cs:42" or "file.cs:42:13")
+        private static readonly Regex _lineNumberPattern = new(@":(\d+)(?::(\d+))?$", RegexOptions.Compiled);
+
+        // Regex to match (lineNumber) or (lineNumber,columnNumber) at the end of the query (e.g., "file.cs(42)" or "file.cs(42,13)")
+        private static readonly Regex _parenLineNumberPattern = new(@"\((\d+)(?:,(\d+))?\)$", RegexOptions.Compiled);
 
         private readonly SearchService _searchService;
         private readonly IVsImageService2 _imageService;
@@ -31,6 +34,7 @@ namespace InstaSearch.UI
         private List<SearchResult> _selectedResults = [];
         private string _pendingQuery;
         private int? _selectedLineNumber;
+        private int? _selectedColumnNumber;
         private bool _isClosing;
 
         /// <summary>
@@ -53,6 +57,12 @@ namespace InstaSearch.UI
         /// Only applies to the first selected file.
         /// </summary>
         public int? SelectedLineNumber => _selectedLineNumber;
+
+        /// <summary>
+        /// Gets the column number to navigate to (1-based), or null if not specified.
+        /// Only applies to the first selected file.
+        /// </summary>
+        public int? SelectedColumnNumber => _selectedColumnNumber;
 
         public SearchDialog(SearchService searchService, IVsImageService2 imageService, string rootPath)
         {
@@ -114,26 +124,36 @@ namespace InstaSearch.UI
         }
 
         /// <summary>
-        /// Parses the query to extract file search text and optional line number.
+        /// Parses the query to extract file search text, optional line number, and optional column number.
         /// </summary>
-        /// <param name="query">The raw query (e.g., "file.cs:42")</param>
-        /// <returns>Tuple of (searchQuery, lineNumber or null)</returns>
-        private static (string searchQuery, int? lineNumber) ParseQueryWithLineNumber(string query)
+        /// <param name="query">The raw query (e.g., "file.cs:42", "file.cs:42:13", "file.cs(42)", or "file.cs(42,23)")</param>
+        /// <returns>Tuple of (searchQuery, lineNumber or null, columnNumber or null)</returns>
+        private static (string searchQuery, int? lineNumber, int? columnNumber) ParseQueryWithLineAndColumn(string query)
         {
             if (string.IsNullOrEmpty(query))
             {
-                return (query, null);
+                return (query, null, null);
             }
 
             Match match = _lineNumberPattern.Match(query);
+            if (!match.Success)
+                match = _parenLineNumberPattern.Match(query);
+
             if (match.Success && int.TryParse(match.Groups[1].Value, out var lineNumber) && lineNumber > 0)
             {
-                // Remove the :lineNumber suffix from the search query
+                int? columnNumber = null;
+                if (match.Groups[2].Success && int.TryParse(match.Groups[2].Value, out var col) && col > 0)
+                {
+                    columnNumber = col;
+                }
+
+                // Remove the line/column suffix from the search query
                 var searchQuery = query.Substring(0, match.Index);
-                return (searchQuery, lineNumber);
+
+                return (searchQuery, lineNumber, columnNumber);
             }
 
-            return (query, null);
+            return (query, null, null);
         }
 
         private async Task PerformSearchAsync(string query)
@@ -147,9 +167,10 @@ namespace InstaSearch.UI
             {
                 StatusText.Text = "Searching...";
 
-                // Parse line number from query (e.g., "file.cs:42")
-                (var searchQuery, var lineNumber) = ParseQueryWithLineNumber(query);
+                // Parse line and column number from query (e.g., "file.cs:42" or "file.cs(42,13)")
+                (var searchQuery, var lineNumber, var columnNumber) = ParseQueryWithLineAndColumn(query);
                 _selectedLineNumber = lineNumber;
+                _selectedColumnNumber = columnNumber;
 
                 IReadOnlyList<SearchResult> results = await _searchService.SearchAsync(_rootPath, searchQuery, _imageService, 100, token);
 
@@ -162,7 +183,11 @@ namespace InstaSearch.UI
                         ResultsListBox.SelectedIndex = 0;
                         ResultsListBox.ScrollIntoView(ResultsListBox.Items[0]);
 
-                        var lineInfo = lineNumber.HasValue ? $" (line {lineNumber})" : "";
+                        var lineInfo = lineNumber.HasValue
+                            ? columnNumber.HasValue
+                                ? $" (line {lineNumber}, col {columnNumber})"
+                                : $" (line {lineNumber})"
+                            : "";
                         StatusText.Text = $"{results.Count} file{(results.Count == 1 ? "" : "s")} found{lineInfo}";
                     }
                     else
@@ -305,7 +330,7 @@ namespace InstaSearch.UI
             if (_selectedResults.Count > 0)
             {
                 _isClosing = true;
-                FilesSelected?.Invoke(this, new FilesSelectedEventArgs(_selectedResults, _selectedLineNumber));
+                FilesSelected?.Invoke(this, new FilesSelectedEventArgs(_selectedResults, _selectedLineNumber, _selectedColumnNumber));
                 Close();
             }
         }
