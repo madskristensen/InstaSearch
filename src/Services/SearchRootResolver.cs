@@ -22,11 +22,15 @@ namespace InstaSearch.Services
             // Try to get the solution path first as it's needed for fallback
             Solution solution = await VS.Solutions.GetCurrentSolutionAsync();
             var solutionPath = solution?.FullPath;
-            var solutionDir = !string.IsNullOrEmpty(solutionPath) ? Path.GetDirectoryName(solutionPath) : null;
+            var solutionDir = string.Empty;
 
-            // Try git repo root first (highest priority)
-            if (!string.IsNullOrEmpty(solutionDir))
+            if (!string.IsNullOrEmpty(solutionPath))
             {
+                // Solution path can be pointing to a folder not just a .sln file in Open Folder scenario, so we need to check if it's a directory first
+                solutionDir = Directory.Exists(solutionPath)
+                    ? solutionPath // Open Folder scenario where FullPath is a directory
+                    : Path.GetDirectoryName(solutionPath);
+                // Try git repo root first (highest priority)
                 var gitRoot = FindGitRoot(solutionDir);
                 if (gitRoot != null)
                 {
