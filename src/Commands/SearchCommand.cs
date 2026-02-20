@@ -33,15 +33,23 @@ namespace InstaSearch
 
             // Get the search root
             var rootPath = await _rootResolver.GetSearchRootAsync();
-            if (string.IsNullOrEmpty(rootPath))
+
+            // Check if there's an active text document (needed for go-to-line even without a workspace)
+            DocumentView activeDocument = await VS.Documents.GetActiveDocumentViewAsync();
+            var hasActiveTextDocument = activeDocument?.TextView != null;
+
+            if (string.IsNullOrEmpty(rootPath) && !hasActiveTextDocument)
             {
-                // No workspace open — show MRU search instead
+                // No workspace and no active document — show MRU search instead
                 await ShowMruSearchDialogAsync();
                 return;
             }
 
-            // Set the workspace root for history (loads history for this workspace)
-            _history.SetWorkspaceRoot(rootPath);
+            // Set the workspace root for history (loads history for this workspace) if we have one
+            if (!string.IsNullOrEmpty(rootPath))
+            {
+                _history.SetWorkspaceRoot(rootPath);
+            }
 
             // Get the image service for file icons
             IVsImageService2 imageService = await VS.GetServiceAsync<SVsImageService, IVsImageService2>();
@@ -56,7 +64,7 @@ namespace InstaSearch
             // Get the main VS window for positioning
             Window mainWindow = Application.Current.MainWindow;
 
-            // Create and show the search dialog
+            // Create and show the search dialog (rootPath may be null if only an active document exists)
             var dialog = new SearchDialog(_searchService, imageService, rootPath);
 
             if (mainWindow != null)
@@ -66,6 +74,7 @@ namespace InstaSearch
 
             dialog.Topmost = true;
             dialog.FilesSelected += OnFilesSelected;
+            dialog.GoToLineRequested += OnGoToLineRequested;
             dialog.Closed += (s, args) => _openDialog = null;
             _openDialog = dialog;
 
@@ -168,6 +177,26 @@ namespace InstaSearch
             });
         }
 
+        private static void OnGoToLineRequested(object sender, GoToLineRequestedEventArgs e)
+        {
+            _ = ThreadHelper.JoinableTaskFactory.StartOnIdle(async () =>
+            {
+                try
+                {
+                    await NavigateToLineInCurrentDocumentAsync(e.LineNumber, e.ColumnNumber);
+
+                    // Register successful usage for rating prompt
+                    _ratingPrompt ??= new RatingPrompt("MadsKristensen.InstaSearch", Vsix.Name, await General.GetLiveInstanceAsync());
+                    _ratingPrompt.RegisterSuccessfulUsage();
+                }
+                catch (Exception ex)
+                {
+                    await VS.StatusBar.ShowMessageAsync($"Error navigating to line: {ex.Message}");
+                    await ex.LogAsync();
+                }
+            });
+        }
+
         /// <summary>
         /// Navigates to a specific line and optional column number in the text view.
         /// </summary>
@@ -198,10 +227,11 @@ namespace InstaSearch
                 ITextSnapshotLine line = snapshot.GetLineFromLineNumber(lineIndex);
                 SnapshotPoint caretPosition = line.Start;
 
-                // Calculate caret position: offset into the line by column if specified, start of line otherwise
+                // Calculate caret position: column is 1-based and means "after N characters"
+                // e.g., column 3 = after 3 characters = position 3
                 if (columnNumber.HasValue)
                 {
-                    caretPosition += Math.Max(0, Math.Min(columnNumber.Value - 1, line.Length));
+                    caretPosition += Math.Max(0, Math.Min(columnNumber.Value, line.Length));
                 }
 
                 // Move caret to the calculated position
@@ -216,6 +246,30 @@ namespace InstaSearch
             {
                 // Silently fail if navigation fails - the file is still open
             }
+        }
+
+        /// <summary>
+        /// Navigates to a specific line and optional column number in the current document.
+        /// Shows a status bar message if no text document is open.
+        /// </summary>
+        /// <param name="lineNumber">The 1-based line number to navigate to.</param>
+        /// <param name="columnNumber">The 1-based column number to navigate to, or null for beginning of line.</param>
+        private static async Task NavigateToLineInCurrentDocumentAsync(int lineNumber, int? columnNumber = null)
+        {
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+            DocumentView documentView = await VS.Documents.GetActiveDocumentViewAsync();
+
+            if (documentView?.TextView == null)
+            {
+                await VS.StatusBar.ShowMessageAsync("Go to line requires an open text document.");
+                return;
+            }
+
+            await NavigateToLineAsync(documentView.TextView, lineNumber, columnNumber);
+
+            var columnInfo = columnNumber.HasValue ? $":{columnNumber}" : "";
+            await VS.StatusBar.ShowMessageAsync($"Line {lineNumber}{columnInfo}");
         }
     }
 }

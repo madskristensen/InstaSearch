@@ -60,6 +60,7 @@
     <Compile Include="Services\SearchService.cs" />
     <Compile Include="Services\WildcardPattern.cs" />
     <Compile Include="UI\FilesSelectedEventArgs.cs" />
+    <Compile Include="UI\GoToLineRequestedEventArgs.cs" />
     <Compile Include="UI\HighlightTextBlock.cs" />
     <Compile Include="UI\MruSearchDialog.xaml.cs">
       <DependentUpon>MruSearchDialog.xaml</DependentUpon>

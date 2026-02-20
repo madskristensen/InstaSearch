@@ -26,6 +26,10 @@ namespace InstaSearch.UI
         // Regex to match (lineNumber) or (lineNumber,columnNumber) at the end of the query (e.g., "file.cs(42)" or "file.cs(42,13)")
         private static readonly Regex _parenLineNumberPattern = new(@"\((\d+)(?:,(\d+))?\)$", RegexOptions.Compiled);
 
+        // Regex to match standalone go-to-line syntax: :lineNumber or :lineNumber:columnNumber (e.g., ":42" or ":42:13")
+        // This is for navigating within the current document without specifying a file
+        private static readonly Regex _goToLinePattern = new(@"^:(\d+)(?::(\d+))?$", RegexOptions.Compiled);
+
         private readonly SearchService _searchService;
         private readonly IVsImageService2 _imageService;
         private readonly string _rootPath;
@@ -41,6 +45,12 @@ namespace InstaSearch.UI
         /// Raised when files are selected and should be opened.
         /// </summary>
         public event EventHandler<FilesSelectedEventArgs> FilesSelected;
+
+        /// <summary>
+        /// Raised when a go-to-line request is made (e.g., ":42" or ":42:13").
+        /// This navigates within the current document without specifying a file.
+        /// </summary>
+        public event EventHandler<GoToLineRequestedEventArgs> GoToLineRequested;
 
         /// <summary>
         /// Gets the selected files. Use this for multi-select scenarios.
@@ -165,6 +175,26 @@ namespace InstaSearch.UI
 
             try
             {
+                // Check for go-to-line syntax (e.g., ":42" or ":42:13") - navigates in current document
+                Match goToLineMatch = _goToLinePattern.Match(query ?? string.Empty);
+                if (goToLineMatch.Success && int.TryParse(goToLineMatch.Groups[1].Value, out var goToLine) && goToLine > 0)
+                {
+                    int? goToColumn = null;
+                    if (goToLineMatch.Groups[2].Success && int.TryParse(goToLineMatch.Groups[2].Value, out var col) && col > 0)
+                    {
+                        goToColumn = col;
+                    }
+
+                    var columnInfo = goToColumn.HasValue ? $", column {goToColumn}" : "";
+                    StatusText.Text = $"Go to line {goToLine}{columnInfo} (press Enter)";
+                    ResultsListBox.ItemsSource = null;
+
+                    // Store the go-to-line info for when Enter is pressed
+                    _selectedLineNumber = goToLine;
+                    _selectedColumnNumber = goToColumn;
+                    return;
+                }
+
                 StatusText.Text = "Searching...";
 
                 // Parse line and column number from query (e.g., "file.cs:42" or "file.cs(42,13)")
@@ -324,6 +354,15 @@ namespace InstaSearch.UI
 
         private void SelectCurrentItem()
         {
+            // Check if this is a go-to-line request (no results but we have line number from :line syntax)
+            if (ResultsListBox.Items.Count == 0 && _selectedLineNumber.HasValue && IsGoToLineQuery())
+            {
+                _isClosing = true;
+                GoToLineRequested?.Invoke(this, new GoToLineRequestedEventArgs(_selectedLineNumber.Value, _selectedColumnNumber));
+                Close();
+                return;
+            }
+
             // Get all selected items (supports multi-select with Ctrl+Click or Shift+Click)
             _selectedResults = [.. ResultsListBox.SelectedItems.Cast<SearchResult>()];
 
@@ -333,6 +372,14 @@ namespace InstaSearch.UI
                 FilesSelected?.Invoke(this, new FilesSelectedEventArgs(_selectedResults, _selectedLineNumber, _selectedColumnNumber));
                 Close();
             }
+        }
+
+        /// <summary>
+        /// Checks if the current query is a go-to-line query (e.g., ":42" or ":42:13").
+        /// </summary>
+        private bool IsGoToLineQuery()
+        {
+            return _goToLinePattern.IsMatch(SearchTextBox.Text ?? string.Empty);
         }
 
         private void OpenFileWithoutClosing()
