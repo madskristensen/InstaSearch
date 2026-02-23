@@ -9,6 +9,10 @@
     {
       "pathOnDisk": "art/search.gif",
       "targetPath": "art/search.gif"
+    },
+    {
+      "pathOnDisk": "art/mru.png",
+      "targetPath": "art/mru.png"
     }
   ],
   "overview": "README.md",
