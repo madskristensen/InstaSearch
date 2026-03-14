@@ -27,6 +27,8 @@ namespace InstaSearch
         private static readonly SearchRootResolver _rootResolver = new();
         private static readonly MruService _mruService = new();
         private static readonly object _imageServiceLock = new();
+        private static readonly System.Threading.Tasks.Task<IReadOnlyList<string>> _emptyRootPathsTask = System.Threading.Tasks.Task.FromResult((IReadOnlyList<string>)Array.Empty<string>());
+        private static readonly System.Threading.Tasks.Task<IReadOnlyList<MruItem>> _emptyMruItemsTask = System.Threading.Tasks.Task.FromResult((IReadOnlyList<MruItem>)Array.Empty<MruItem>());
         private static IVsImageService2 _imageService;
         private static System.Threading.Tasks.Task<IVsImageService2> _imageServiceTask;
         private static RatingPrompt _ratingPrompt;
@@ -50,10 +52,7 @@ namespace InstaSearch
 
             var prerequisites = CreateDialogPrerequisites();
             StartWorkspaceTracking(prerequisites.RootPathsTask);
-
-            var dialog = CreateDialog(prerequisites);
-            _openDialog = dialog;
-            dialog.ShowDialog();
+            ShowDialog(prerequisites);
         }
 
         private static SearchDialogPrerequisites CreateDialogPrerequisites()
@@ -85,6 +84,13 @@ namespace InstaSearch
             dialog.MruItemSelected += OnMruItemSelected;
             dialog.Closed += OnSearchDialogClosed;
             return dialog;
+        }
+
+        private static void ShowDialog(SearchDialogPrerequisites prerequisites)
+        {
+            var dialog = CreateDialog(prerequisites);
+            _openDialog = dialog;
+            dialog.ShowDialog();
         }
 
         private static void OnSearchDialogClosed(object sender, EventArgs e)
@@ -273,13 +279,11 @@ namespace InstaSearch
                 return;
             }
 
-            var prerequisites = CreateDialogPrerequisites();
-
             _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
             {
                 try
                 {
-                    IReadOnlyList<string> roots = await prerequisites.RootPathsTask;
+                    IReadOnlyList<string> roots = await _rootResolver.GetSearchRootsAsync();
                     await _searchService.WarmupIndexAsync(roots, cancellationToken);
                 }
                 catch (OperationCanceledException)
@@ -295,9 +299,9 @@ namespace InstaSearch
             {
                 try
                 {
-                    await prerequisites.MruItemsTask;
-                    await prerequisites.ImageServiceTask;
-                    await WarmDialogShellAsync(prerequisites, cancellationToken);
+                    await _mruService.GetMruItemsAsync();
+                    await GetOrCreateImageServiceTask();
+                    await WarmDialogShellAsync(cancellationToken);
                 }
                 catch (OperationCanceledException)
                 {
@@ -309,7 +313,7 @@ namespace InstaSearch
             });
         }
 
-        private static async System.Threading.Tasks.Task WarmDialogShellAsync(SearchDialogPrerequisites prerequisites, CancellationToken cancellationToken)
+        private static async System.Threading.Tasks.Task WarmDialogShellAsync(CancellationToken cancellationToken)
         {
             if (Interlocked.Exchange(ref _dialogShellWarmed, 1) != 0)
             {
@@ -326,9 +330,9 @@ namespace InstaSearch
             _ = new SearchDialog(
                 _searchService,
                 _mruService,
-                prerequisites.RootPathsTask,
-                prerequisites.MruItemsTask,
-                prerequisites.ImageServiceTask);
+                _emptyRootPathsTask,
+                _emptyMruItemsTask,
+                GetOrCreateImageServiceTask());
         }
 
         private static void OnFilesSelected(object sender, FilesSelectedEventArgs e)
