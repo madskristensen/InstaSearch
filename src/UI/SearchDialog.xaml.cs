@@ -31,8 +31,11 @@ namespace InstaSearch.UI
         private static readonly Regex _goToLinePattern = new(@"^:(\d+)(?::(\d+))?$", RegexOptions.Compiled);
 
         private readonly SearchService _searchService;
+        private readonly MruService _mruService;
         private readonly IVsImageService2 _imageService;
         private readonly string _rootPath;
+        private readonly List<MruItem> _mruItems;
+        private readonly bool _hasWorkspaceRoot;
         private readonly DispatcherTimer _debounceTimer;
         private CancellationTokenSource _searchCts;
         private List<SearchResult> _selectedResults = [];
@@ -40,6 +43,7 @@ namespace InstaSearch.UI
         private int? _selectedLineNumber;
         private int? _selectedColumnNumber;
         private bool _isClosing;
+        private bool _isContextMenuOpen;
 
         /// <summary>
         /// Raised when files are selected and should be opened.
@@ -51,6 +55,11 @@ namespace InstaSearch.UI
         /// This navigates within the current document without specifying a file.
         /// </summary>
         public event EventHandler<GoToLineRequestedEventArgs> GoToLineRequested;
+
+        /// <summary>
+        /// Raised when an MRU item is selected and should be opened.
+        /// </summary>
+        public event EventHandler<MruItemSelectedEventArgs> MruItemSelected;
 
         /// <summary>
         /// Gets the selected files. Use this for multi-select scenarios.
@@ -74,12 +83,23 @@ namespace InstaSearch.UI
         /// </summary>
         public int? SelectedColumnNumber => _selectedColumnNumber;
 
-        public SearchDialog(SearchService searchService, IVsImageService2 imageService, string rootPath)
+        public SearchDialog(SearchService searchService, MruService mruService, IVsImageService2 imageService, string rootPath, IReadOnlyList<MruItem> mruItems)
         {
             InitializeComponent();
             _searchService = searchService;
+            _mruService = mruService;
             _imageService = imageService;
             _rootPath = rootPath;
+            _mruItems = mruItems != null ? [.. mruItems] : [];
+            _hasWorkspaceRoot = !string.IsNullOrEmpty(rootPath);
+
+            PlaceholderText.Text = _hasWorkspaceRoot
+                ? "Search files and recent solutions/folders (use .ext -.ext \\path\\ to filter)"
+                : "Search recent solutions and folders";
+
+            RefreshLinkContainer.Visibility = _hasWorkspaceRoot
+                ? Visibility.Visible
+                : Visibility.Collapsed;
 
             // Restore saved window size
             General settings = General.Instance;
@@ -99,7 +119,7 @@ namespace InstaSearch.UI
         private void SearchDialog_Deactivated(object sender, EventArgs e)
         {
             // Close when user clicks outside the dialog (but not if already closing)
-            if (!_isClosing)
+            if (!_isClosing && !_isContextMenuOpen)
             {
                 _isClosing = true;
                 Close();
@@ -202,13 +222,24 @@ namespace InstaSearch.UI
                 _selectedLineNumber = lineNumber;
                 _selectedColumnNumber = columnNumber;
 
-                IReadOnlyList<SearchResult> results = await _searchService.SearchAsync(_rootPath, searchQuery, _imageService, 100, token);
+                List<SearchDialogItem> combinedResults = [];
+
+                List<MruItem> mruResults = FilterMruItems(searchQuery);
+
+                IReadOnlyList<SearchResult> fileResults = [];
+                if (_hasWorkspaceRoot)
+                {
+                    fileResults = await _searchService.SearchAsync(_rootPath, searchQuery, _imageService, 100, token);
+                    combinedResults.AddRange(fileResults.Select(SearchDialogItem.FromFile));
+                }
+
+                combinedResults.AddRange(mruResults.Select(SearchDialogItem.FromMru));
 
                 if (!token.IsCancellationRequested)
                 {
-                    ResultsListBox.ItemsSource = results;
+                    ResultsListBox.ItemsSource = combinedResults;
 
-                    if (results.Count > 0)
+                    if (combinedResults.Count > 0)
                     {
                         ResultsListBox.SelectedIndex = 0;
                         ResultsListBox.ScrollIntoView(ResultsListBox.Items[0]);
@@ -218,13 +249,11 @@ namespace InstaSearch.UI
                                 ? $" (line {lineNumber}, col {columnNumber})"
                                 : $" (line {lineNumber})"
                             : "";
-                        StatusText.Text = $"{results.Count} file{(results.Count == 1 ? "" : "s")} found{lineInfo}";
+                        StatusText.Text = BuildStatusText(fileResults.Count, mruResults.Count, lineInfo);
                     }
                     else
                     {
-                        StatusText.Text = string.IsNullOrEmpty(query)
-                            ? "Type to search files"
-                            : "No files found";
+                        StatusText.Text = BuildEmptyStatusText(query);
                     }
                 }
             }
@@ -363,8 +392,22 @@ namespace InstaSearch.UI
                 return;
             }
 
-            // Get all selected items (supports multi-select with Ctrl+Click or Shift+Click)
-            _selectedResults = [.. ResultsListBox.SelectedItems.Cast<SearchResult>()];
+            if (ResultsListBox.SelectedItem is SearchDialogItem selectedItem && selectedItem.IsMru)
+            {
+                _isClosing = true;
+                MruItemSelected?.Invoke(this, new MruItemSelectedEventArgs(selectedItem.MruItem));
+                Close();
+                return;
+            }
+
+            // Get all selected file items (supports multi-select with Ctrl+Click or Shift+Click)
+            _selectedResults =
+            [
+                .. ResultsListBox.SelectedItems
+                    .OfType<SearchDialogItem>()
+                    .Where(item => item.IsFile)
+                    .Select(item => item.FileResult)
+            ];
 
             if (_selectedResults.Count > 0)
             {
@@ -384,12 +427,12 @@ namespace InstaSearch.UI
 
         private void OpenFileWithoutClosing()
         {
-            if (ResultsListBox.SelectedItem is SearchResult result)
+            if (ResultsListBox.SelectedItem is SearchDialogItem selectedItem && selectedItem.IsFile)
             {
                 try
                 {
-                    VS.Documents.OpenAsync(result.FullPath).FireAndForget();
-                    _searchService.RecordSelectionAsync(result.FullPath).FireAndForget();
+                    VS.Documents.OpenAsync(selectedItem.FileResult.FullPath).FireAndForget();
+                    _searchService.RecordSelectionAsync(selectedItem.FileResult.FullPath).FireAndForget();
                 }
                 catch (Exception ex)
                 {
@@ -412,10 +455,109 @@ namespace InstaSearch.UI
 
         private void RefreshLink_Click(object sender, RoutedEventArgs e)
         {
+            if (!_hasWorkspaceRoot)
+            {
+                return;
+            }
+
             // Invalidate cache and re-search
             _searchService.RefreshIndex(_rootPath);
             PerformSearchAsync(SearchTextBox.Text).FireAndForget();
             SearchTextBox.Focus();
+        }
+
+        private List<MruItem> FilterMruItems(string query)
+        {
+            if (_mruItems.Count == 0)
+            {
+                return [];
+            }
+
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                return [.. _mruItems];
+            }
+
+            var queryLower = query.ToLowerInvariant();
+            return
+            [
+                .. _mruItems.Where(item =>
+                    item.DisplayNameLower.Contains(queryLower) ||
+                    item.FullPath.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0)
+            ];
+        }
+
+        private void ResultsContextMenu_Opened(object sender, RoutedEventArgs e)
+        {
+            _isContextMenuOpen = true;
+
+            if (sender is System.Windows.Controls.ContextMenu contextMenu
+                && contextMenu.Items.Count > 0
+                && contextMenu.Items[0] is System.Windows.Controls.MenuItem removeMenuItem)
+            {
+                removeMenuItem.IsEnabled = ResultsListBox.SelectedItem is SearchDialogItem item && item.IsMru;
+            }
+        }
+
+        private void ResultsContextMenu_Closed(object sender, RoutedEventArgs e)
+        {
+            _isContextMenuOpen = false;
+        }
+
+        private void RemoveMruMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            RemoveSelectedMruAsync().FireAndForget();
+        }
+
+        private async Task RemoveSelectedMruAsync()
+        {
+            if (ResultsListBox.SelectedItem is not SearchDialogItem item || !item.IsMru || item.MruItem == null)
+            {
+                return;
+            }
+
+            await _mruService.RemovePathAsync(item.MruItem.FullPath);
+            _mruItems.RemoveAll(existing =>
+                string.Equals(existing.FullPath, item.MruItem.FullPath, StringComparison.OrdinalIgnoreCase));
+
+            await PerformSearchAsync(SearchTextBox.Text);
+            SearchTextBox.Focus();
+        }
+
+        private void ResultsListBoxItem_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (sender is System.Windows.Controls.ListBoxItem listBoxItem)
+            {
+                ResultsListBox.SelectedItems.Clear();
+                listBoxItem.IsSelected = true;
+                ResultsListBox.SelectedItem = listBoxItem.DataContext;
+                listBoxItem.Focus();
+            }
+        }
+
+        private string BuildStatusText(int fileCount, int mruCount, string lineInfo)
+        {
+            if (_hasWorkspaceRoot)
+            {
+                var total = fileCount + mruCount;
+                return $"{total} result{(total == 1 ? "" : "s")} ({fileCount} file{(fileCount == 1 ? "" : "s")}, {mruCount} recent)" + lineInfo;
+            }
+
+            return $"{mruCount} recent item{(mruCount == 1 ? "" : "s")}";
+        }
+
+        private string BuildEmptyStatusText(string query)
+        {
+            if (string.IsNullOrEmpty(query))
+            {
+                return _hasWorkspaceRoot
+                    ? "Type to search files and recent items"
+                    : "No recent solutions or folders";
+            }
+
+            return _hasWorkspaceRoot
+                ? "No matching files or recent items"
+                : "No matching items";
         }
 
         protected override void OnClosed(EventArgs e)

@@ -34,21 +34,14 @@ namespace InstaSearch
             // Get the search root
             var rootPath = await _rootResolver.GetSearchRootAsync();
 
-            // Check if there's an active text document (needed for go-to-line even without a workspace)
-            DocumentView activeDocument = await VS.Documents.GetActiveDocumentViewAsync();
-            var hasActiveTextDocument = activeDocument?.TextView != null;
-
-            if (string.IsNullOrEmpty(rootPath) && !hasActiveTextDocument)
-            {
-                // No workspace and no active document — show MRU search instead
-                await ShowMruSearchDialogAsync();
-                return;
-            }
+            IReadOnlyList<MruItem> mruItems = await _mruService.GetMruItemsAsync();
 
             // Set the workspace root for history (loads history for this workspace) if we have one
             if (!string.IsNullOrEmpty(rootPath))
             {
                 _history.SetWorkspaceRoot(rootPath);
+                var mruPath = await _rootResolver.GetCurrentWorkspacePathForMruAsync();
+                await _mruService.RecordPathAsync(mruPath);
             }
 
             // Get the image service for file icons
@@ -64,8 +57,8 @@ namespace InstaSearch
             // Get the main VS window for positioning
             Window mainWindow = Application.Current.MainWindow;
 
-            // Create and show the search dialog (rootPath may be null if only an active document exists)
-            var dialog = new SearchDialog(_searchService, imageService, rootPath);
+            // Create and show the unified search dialog
+            var dialog = new SearchDialog(_searchService, _mruService, imageService, rootPath, mruItems);
 
             if (mainWindow != null)
             {
@@ -75,39 +68,11 @@ namespace InstaSearch
             dialog.Topmost = true;
             dialog.FilesSelected += OnFilesSelected;
             dialog.GoToLineRequested += OnGoToLineRequested;
+            dialog.MruItemSelected += OnMruItemSelected;
             dialog.Closed += (s, args) => _openDialog = null;
             _openDialog = dialog;
 
             dialog.ShowDialog();
-        }
-
-        /// <summary>
-        /// Shows the MRU search dialog for recently opened solutions and folders.
-        /// </summary>
-        private static async Task ShowMruSearchDialogAsync()
-        {
-            IReadOnlyList<MruItem> mruItems = await _mruService.GetMruItemsAsync();
-            if (mruItems.Count == 0)
-            {
-                await VS.StatusBar.ShowMessageAsync("No recent solutions or folders found.");
-                return;
-            }
-
-            Window mainWindow = Application.Current.MainWindow;
-            var dialog = new MruSearchDialog(mruItems);
-
-            if (mainWindow != null)
-            {
-                dialog.Owner = mainWindow;
-            }
-
-            dialog.Topmost = true;
-
-            if (dialog.ShowDialog() == true && dialog.SelectedItem != null)
-            {
-                MruItem selected = dialog.SelectedItem;
-                OpenMruItemAsync(selected).FireAndForget();
-            }
         }
 
         /// <summary>
@@ -135,6 +100,17 @@ namespace InstaSearch
                 await VS.StatusBar.ShowMessageAsync($"Error opening: {ex.Message}");
                 await ex.LogAsync();
             }
+        }
+
+        private static void OnMruItemSelected(object sender, MruItemSelectedEventArgs e)
+        {
+            if (e?.SelectedItem == null)
+            {
+                return;
+            }
+
+            _mruService.RecordItemAsync(e.SelectedItem).FireAndForget();
+            OpenMruItemAsync(e.SelectedItem).FireAndForget();
         }
 
         private static void OnFilesSelected(object sender, FilesSelectedEventArgs e)

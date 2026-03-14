@@ -30,6 +30,7 @@
             <Setter Property="BorderBrush" Value="Transparent"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Foreground" Value="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"/>
+            <EventSetter Event="PreviewMouseRightButtonDown" Handler="ResultsListBoxItem_PreviewMouseRightButtonDown"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
@@ -116,7 +117,7 @@
                         <!-- Placeholder text shown when search box is empty -->
                         <TextBlock x:Name="PlaceholderText"
                                    Grid.Column="1"
-                                   Text="Search files (use .ext -.ext \path\ to filter)"
+                                   Text="Search files and recent solutions/folders"
                                    FontSize="14"
                                    Padding="2"
                                    Margin="4,0,0,0"
@@ -142,6 +143,13 @@
                      MouseDoubleClick="ResultsListBox_MouseDoubleClick"
                      SelectionChanged="ResultsListBox_SelectionChanged"
                      Margin="0,2,0,0">
+                <ListBox.ContextMenu>
+                    <ContextMenu Opened="ResultsContextMenu_Opened"
+                                 Closed="ResultsContextMenu_Closed">
+                        <MenuItem Header="Remove from list"
+                                  Click="RemoveMruMenuItem_Click" />
+                    </ContextMenu>
+                </ListBox.ContextMenu>
                 <ListBox.ItemsPanel>
                     <ItemsPanelTemplate>
                         <VirtualizingStackPanel />
@@ -165,12 +173,18 @@
 
                             <!-- File Name and Path -->
                             <StackPanel Grid.Column="1" Orientation="Vertical">
-                                <local:HighlightTextBlock SourceText="{Binding FileName, Mode=OneTime}"
+                                <local:HighlightTextBlock x:Name="FileNameHighlight"
+                                                          SourceText="{Binding FileName, Mode=OneTime}"
                                                           SourceTextLower="{Binding FileNameLower, Mode=OneTime}"
                                                           HighlightText="{Binding QueryLower, Mode=OneTime}"
                                                           FontSize="13"
                                                           Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"/>
-                                <TextBlock Text="{Binding RelativePath, Mode=OneTime}" 
+                                <TextBlock x:Name="MruNameText"
+                                           Text="{Binding DisplayName, Mode=OneTime}"
+                                           Visibility="Collapsed"
+                                           FontSize="13"
+                                           Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"/>
+                                <TextBlock Text="{Binding SecondaryText, Mode=OneTime}" 
                                            FontSize="10"
                                            Opacity="0.55"
                                            Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"
@@ -178,6 +192,12 @@
                                            Margin="0,1,0,0"/>
                             </StackPanel>
                         </Grid>
+                        <DataTemplate.Triggers>
+                            <DataTrigger Binding="{Binding IsMru, Mode=OneTime}" Value="True">
+                                <Setter TargetName="FileNameHighlight" Property="Visibility" Value="Collapsed"/>
+                                <Setter TargetName="MruNameText" Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
+                        </DataTemplate.Triggers>
                     </DataTemplate>
                 </ListBox.ItemTemplate>
             </ListBox>
@@ -201,7 +221,8 @@
                                Foreground="{DynamicResource {x:Static vs:EnvironmentColors.ToolWindowTextBrushKey}}"/>
 
                     <!-- Refresh Link -->
-                    <TextBlock Grid.Column="1"
+                    <TextBlock x:Name="RefreshLinkContainer"
+                               Grid.Column="1"
                                FontSize="11"
                                VerticalAlignment="Center"
                                Margin="0,0,12,0"

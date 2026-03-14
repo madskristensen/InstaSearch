@@ -3,7 +3,7 @@ using Microsoft.VisualStudio.Imaging.Interop;
 namespace InstaSearch.Services
 {
     /// <summary>
-    /// Represents a recently opened solution or folder from the VS MRU list.
+    /// Represents a recently opened solution, project, or folder from MRU sources.
     /// </summary>
     public class MruItem(string fullPath, string displayName, MruItemKind kind, ImageMoniker moniker)
     {
@@ -24,6 +24,7 @@ namespace InstaSearch.Services
     public enum MruItemKind
     {
         Solution,
+        Project,
         Folder
     }
 }

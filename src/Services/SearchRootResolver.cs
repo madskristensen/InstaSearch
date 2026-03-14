@@ -13,6 +13,28 @@ namespace InstaSearch.Services
     public class SearchRootResolver
     {
         /// <summary>
+        /// Gets the currently opened workspace path for MRU tracking.
+        /// Returns a solution/project file path when available; otherwise an open folder path.
+        /// </summary>
+        public async Task<string> GetCurrentWorkspacePathForMruAsync()
+        {
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+            Solution solution = await VS.Solutions.GetCurrentSolutionAsync();
+            var solutionPath = solution?.FullPath;
+
+            if (!string.IsNullOrEmpty(solutionPath))
+            {
+                if (File.Exists(solutionPath) || Directory.Exists(solutionPath))
+                {
+                    return solutionPath;
+                }
+            }
+
+            return await GetOpenFolderAsync();
+        }
+
+        /// <summary>
         /// Gets the search root directory based on the current VS context.
         /// </summary>
         public async Task<string> GetSearchRootAsync()
@@ -67,7 +89,9 @@ namespace InstaSearch.Services
                 {
                     // Check if this is an "Open Folder" scenario (no .sln file)
                     var solutionFullName = dte.Solution.FullName;
-                    if (string.IsNullOrEmpty(solutionFullName) || !solutionFullName.EndsWith(".sln", StringComparison.OrdinalIgnoreCase))
+                    if (string.IsNullOrEmpty(solutionFullName)
+                        || (!solutionFullName.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)
+                            && !solutionFullName.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase)))
                     {
                         // Try to get the folder from the solution's properties
                         var solutionDir = dte.Solution.Properties?.Item("Path")?.Value as string;
