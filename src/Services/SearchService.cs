@@ -73,6 +73,19 @@ namespace InstaSearch.Services
                 return [];
             }
 
+            // Parse query into core text + optional extension/path filters (once per keystroke)
+            var searchQuery = SearchQuery.Parse(query);
+            CompiledIgnoredPattern[] ignoredPatterns = GetCompiledIgnoredPatterns();
+
+            if (searchQuery.Text.Length == 0 && !searchQuery.HasFilters)
+            {
+                IReadOnlyList<SearchResult> historyResults = await GetHistoryResultsWithoutIndexAsync(normalizedRoots, imageService, maxResults, ignoredPatterns, cancellationToken);
+                if (historyResults.Count > 0)
+                {
+                    return historyResults;
+                }
+            }
+
             // Get indexed files from all roots and de-duplicate by full path
             IReadOnlyList<FileEntry>[] indexedByRoot = await Task.WhenAll(
                 normalizedRoots.Select(path => IndexRootWithGateAsync(path, cancellationToken)));
@@ -80,10 +93,6 @@ namespace InstaSearch.Services
             IReadOnlyList<FileEntry> files = MergeUniqueFiles(indexedByRoot);
 
             IReadOnlyList<FileEntry> rankedFiles;
-
-            // Parse query into core text + optional extension/path filters (once per keystroke)
-            var searchQuery = SearchQuery.Parse(query);
-            CompiledIgnoredPattern[] ignoredPatterns = GetCompiledIgnoredPatterns();
             var historyScoreCache = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
             int GetSelectionCountCached(string fullPath)
@@ -317,6 +326,97 @@ namespace InstaSearch.Services
             }
 
             return [.. merged.Values];
+        }
+
+        private async Task<IReadOnlyList<SearchResult>> GetHistoryResultsWithoutIndexAsync(
+            IReadOnlyList<string> normalizedRoots,
+            IVsImageService2 imageService,
+            int maxResults,
+            IReadOnlyList<CompiledIgnoredPattern> ignoredPatterns,
+            CancellationToken cancellationToken)
+        {
+            if (maxResults <= 0)
+            {
+                return [];
+            }
+
+            IReadOnlyList<KeyValuePair<string, int>> topSelections = history.GetTopSelections(maxResults * 4);
+            if (topSelections.Count == 0)
+            {
+                return [];
+            }
+
+            var historyFiles = new List<FileEntry>(topSelections.Count);
+            var scoreByPath = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (KeyValuePair<string, int> selection in topSelections)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                string fullPath = selection.Key;
+                if (string.IsNullOrWhiteSpace(fullPath)
+                    || selection.Value <= 0
+                    || !File.Exists(fullPath)
+                    || !TryGetRelativePathFromRoots(fullPath, normalizedRoots, out string relativePath))
+                {
+                    continue;
+                }
+
+                string fileName = Path.GetFileName(fullPath);
+                string fileNameLower = fileName.ToLowerInvariant();
+
+                if (IsExcludedByPattern(fileNameLower, ignoredPatterns))
+                {
+                    continue;
+                }
+
+                var fileEntry = new FileEntry(fileName, fullPath, relativePath);
+                historyFiles.Add(fileEntry);
+                scoreByPath[fileEntry.FullPath] = selection.Value;
+            }
+
+            IReadOnlyList<FileEntry> rankedHistoryFiles = SelectTopN(
+                historyFiles,
+                f => new RankedFile(f, scoreByPath[f.FullPath], false, false, IsCodeFile(f), f.FileNameLower.Length),
+                maxResults);
+
+            if (rankedHistoryFiles.Count == 0)
+            {
+                return [];
+            }
+
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+
+            var results = new List<SearchResult>(rankedHistoryFiles.Count);
+            foreach (FileEntry file in rankedHistoryFiles)
+            {
+                results.Add(new SearchResult(file, scoreByPath[file.FullPath], GetMonikerCached(imageService, file.FileName), string.Empty));
+            }
+
+            return results;
+        }
+
+        private static bool TryGetRelativePathFromRoots(string fullPath, IReadOnlyList<string> normalizedRoots, out string relativePath)
+        {
+            foreach (string root in normalizedRoots)
+            {
+                if (fullPath.Length <= root.Length || !fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                char separator = fullPath[root.Length];
+                if (separator != Path.DirectorySeparatorChar && separator != Path.AltDirectorySeparatorChar)
+                {
+                    continue;
+                }
+
+                relativePath = fullPath.Substring(root.Length + 1);
+                return true;
+            }
+
+            relativePath = null;
+            return false;
         }
 
         private static ImageMoniker GetMoniker(IVsImageService2 imageService, string fileName)

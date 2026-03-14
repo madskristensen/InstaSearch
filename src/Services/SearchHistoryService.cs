@@ -89,6 +89,27 @@ namespace InstaSearch.Services
         }
 
         /// <summary>
+        /// Gets the top history entries ordered by selection count.
+        /// </summary>
+        public IReadOnlyList<KeyValuePair<string, int>> GetTopSelections(int maxResults)
+        {
+            if (maxResults <= 0)
+            {
+                return [];
+            }
+
+            // Snapshot for a consistent, lock-free read.
+            return
+            [
+                .. _selectionCounts
+                    .Where(kvp => kvp.Value > 0 && !string.IsNullOrWhiteSpace(kvp.Key))
+                    .OrderByDescending(kvp => kvp.Value)
+                    .ThenBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
+                    .Take(maxResults)
+            ];
+        }
+
+        /// <summary>
         /// Saves history to disk if there are pending changes.
         /// </summary>
         public async Task SaveAsync()
