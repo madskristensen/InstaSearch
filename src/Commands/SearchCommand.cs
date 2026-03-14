@@ -27,8 +27,6 @@ namespace InstaSearch
         private static readonly SearchRootResolver _rootResolver = new();
         private static readonly MruService _mruService = new();
         private static readonly object _imageServiceLock = new();
-        private static readonly System.Threading.Tasks.Task<IReadOnlyList<string>> _emptyRootPathsTask = System.Threading.Tasks.Task.FromResult((IReadOnlyList<string>)Array.Empty<string>());
-        private static readonly System.Threading.Tasks.Task<IReadOnlyList<MruItem>> _emptyMruItemsTask = System.Threading.Tasks.Task.FromResult((IReadOnlyList<MruItem>)Array.Empty<MruItem>());
         private static IVsImageService2 _imageService;
         private static System.Threading.Tasks.Task<IVsImageService2> _imageServiceTask;
         private static RatingPrompt _ratingPrompt;
@@ -38,7 +36,6 @@ namespace InstaSearch
         private static IgnoredFolderFilter GetIgnoredFolders() => General.Instance.GetIgnoredFolderFilter();
         private static IReadOnlyList<string> GetIgnoredFilePatterns() => General.Instance.GetIgnoredFilePatternsList();
 
-        // Track the open dialog instance to prevent multiple windows
         private static SearchDialog _openDialog;
 
         protected override async Task ExecuteAsync(OleMenuCmdEventArgs e)
@@ -300,7 +297,7 @@ namespace InstaSearch
                 {
                     await prerequisites.MruItemsTask;
                     await prerequisites.ImageServiceTask;
-                    await WarmDialogShellAsync(cancellationToken);
+                    await WarmDialogShellAsync(prerequisites, cancellationToken);
                 }
                 catch (OperationCanceledException)
                 {
@@ -312,7 +309,7 @@ namespace InstaSearch
             });
         }
 
-        private static async System.Threading.Tasks.Task WarmDialogShellAsync(CancellationToken cancellationToken)
+        private static async System.Threading.Tasks.Task WarmDialogShellAsync(SearchDialogPrerequisites prerequisites, CancellationToken cancellationToken)
         {
             if (Interlocked.Exchange(ref _dialogShellWarmed, 1) != 0)
             {
@@ -329,9 +326,9 @@ namespace InstaSearch
             _ = new SearchDialog(
                 _searchService,
                 _mruService,
-                _emptyRootPathsTask,
-                _emptyMruItemsTask,
-                GetOrCreateImageServiceTask());
+                prerequisites.RootPathsTask,
+                prerequisites.MruItemsTask,
+                prerequisites.ImageServiceTask);
         }
 
         private static void OnFilesSelected(object sender, FilesSelectedEventArgs e)

@@ -172,6 +172,7 @@ namespace InstaSearch.UI
                 IReadOnlyList<MruItem> mruItems = await _mruItemsTask;
 
                 _imageService = await _imageServiceTask;
+
                 _rootPaths = rootPaths
                     ?.Where(path => !string.IsNullOrWhiteSpace(path))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -196,6 +197,13 @@ namespace InstaSearch.UI
             {
                 StatusText.Text = $"Error: {ex.Message}";
             }
+        }
+
+        private void CancelPendingSearch()
+        {
+            _searchCts?.Cancel();
+            _searchCts?.Dispose();
+            _searchCts = null;
         }
 
         private void SearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -262,7 +270,7 @@ namespace InstaSearch.UI
         private async Task PerformSearchAsync(string query)
         {
             // Cancel any pending search
-            _searchCts?.Cancel();
+            CancelPendingSearch();
             _searchCts = new CancellationTokenSource();
             CancellationToken token = _searchCts.Token;
             Interlocked.Increment(ref _activeSearchCount);
@@ -742,8 +750,7 @@ namespace InstaSearch.UI
         protected override void OnClosed(EventArgs e)
         {
             _debounceTimer.Stop();
-            _searchCts?.Cancel();
-            _searchCts?.Dispose();
+            CancelPendingSearch();
 
             // Save window size for next time
             General settings = General.Instance;
