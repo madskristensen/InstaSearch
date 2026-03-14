@@ -556,6 +556,11 @@ namespace InstaSearch.UI
 
             if (string.IsNullOrWhiteSpace(query))
             {
+                if (_hasWorkspaceRoot)
+                {
+                    return [];
+                }
+
                 return [.. _mruItems];
             }
 
@@ -632,7 +637,7 @@ namespace InstaSearch.UI
             if (string.IsNullOrEmpty(query))
             {
                 return _hasWorkspaceRoot
-                    ? "Type to search files and recent items"
+                    ? "Type to search files"
                     : "No recent solutions or folders";
             }
 

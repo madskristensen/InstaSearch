@@ -21,11 +21,15 @@ namespace InstaSearch.Services
         /// </summary>
         public async Task<IReadOnlyList<string>> GetSearchRootsAsync()
         {
-            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            var solutionPath = await GetSolutionPathAsync();
+            var openFolder = await GetOpenFolderAsync();
+            return await Task.Run(() => BuildSearchRoots(solutionPath, openFolder));
+        }
 
+        private static IReadOnlyList<string> BuildSearchRoots(string solutionPath, string openFolder)
+        {
             var candidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            var solutionPath = await GetSolutionPathAsync();
             var solutionDir = NormalizeToDirectory(solutionPath);
             if (!string.IsNullOrEmpty(solutionDir))
             {
@@ -37,7 +41,6 @@ namespace InstaSearch.Services
                 candidates.Add(projectDirectory);
             }
 
-            var openFolder = await GetOpenFolderAsync();
             var openFolderDir = NormalizeToDirectory(openFolder);
             if (!string.IsNullOrEmpty(openFolderDir))
             {

@@ -99,20 +99,25 @@ namespace InstaSearch.Services
             // Snapshot current state - ConcurrentDictionary.ToList is thread-safe
             var toSave = _selectionCounts.ToList();
             var filePath = _historyFilePath;
-            _isDirty = false;
-
-            await Task.Run(() =>
+            var saveSucceeded = await Task.Run(() =>
             {
                 try
                 {
                     IEnumerable<string> lines = toSave.Select(kvp => $"{kvp.Value}|{kvp.Key}");
                     File.WriteAllLines(filePath, lines);
+                    return true;
                 }
                 catch
                 {
                     // Ignore save errors - history is not critical
+                    return false;
                 }
             });
+
+            if (saveSucceeded)
+            {
+                _isDirty = false;
+            }
         }
 
         private void LoadHistory()

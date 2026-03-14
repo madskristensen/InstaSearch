@@ -503,6 +503,9 @@ namespace InstaSearch.Services
                         }
                         catch (UnauthorizedAccessException) { }
                         catch (DirectoryNotFoundException) { }
+                        catch (PathTooLongException) { }
+                        catch (IOException) { }
+                        catch (System.Security.SecurityException) { }
 
                         // Decrement pending count; if zero, signal completion
                         if (Interlocked.Decrement(ref pendingCount) == 0)
