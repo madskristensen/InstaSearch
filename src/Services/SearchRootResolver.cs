@@ -1,4 +1,7 @@
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using EnvDTE80;
 
@@ -13,6 +16,51 @@ namespace InstaSearch.Services
     public class SearchRootResolver
     {
         /// <summary>
+        /// Gets all search root directories based on current VS context.
+        /// Includes solution/open-folder roots and all loaded project roots.
+        /// </summary>
+        public async Task<IReadOnlyList<string>> GetSearchRootsAsync()
+        {
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+            var candidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            var solutionPath = await GetSolutionPathAsync();
+            var solutionDir = NormalizeToDirectory(solutionPath);
+            if (!string.IsNullOrEmpty(solutionDir))
+            {
+                candidates.Add(solutionDir);
+            }
+
+            foreach (var projectDirectory in ParseSolutionProjectDirectories(solutionPath))
+            {
+                candidates.Add(projectDirectory);
+            }
+
+            var openFolder = await GetOpenFolderAsync();
+            var openFolderDir = NormalizeToDirectory(openFolder);
+            if (!string.IsNullOrEmpty(openFolderDir))
+            {
+                candidates.Add(openFolderDir);
+            }
+
+            if (candidates.Count == 0)
+            {
+                return [];
+            }
+
+            var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var candidate in candidates)
+            {
+                var gitRoot = FindGitRoot(candidate);
+                var root = gitRoot ?? candidate;
+                roots.Add(Path.GetFullPath(root));
+            }
+
+            return [.. roots.OrderBy(path => path, StringComparer.OrdinalIgnoreCase)];
+        }
+
+        /// <summary>
         /// Gets the currently opened workspace path for MRU tracking.
         /// Returns a solution/project file path when available; otherwise an open folder path.
         /// </summary>
@@ -20,8 +68,7 @@ namespace InstaSearch.Services
         {
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-            Solution solution = await VS.Solutions.GetCurrentSolutionAsync();
-            var solutionPath = solution?.FullPath;
+            var solutionPath = await GetSolutionPathAsync();
 
             if (!string.IsNullOrEmpty(solutionPath))
             {
@@ -39,43 +86,145 @@ namespace InstaSearch.Services
         /// </summary>
         public async Task<string> GetSearchRootAsync()
         {
-            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            IReadOnlyList<string> roots = await GetSearchRootsAsync();
+            return roots.Count > 0 ? roots[0] : null;
+        }
 
-            // Try to get the solution path first as it's needed for fallback
-            Solution solution = await VS.Solutions.GetCurrentSolutionAsync();
-            var solutionPath = solution?.FullPath;
-            var solutionDir = string.Empty;
-
-            if (!string.IsNullOrEmpty(solutionPath))
+        private static IEnumerable<string> ParseSolutionProjectDirectories(string solutionPath)
+        {
+            if (string.IsNullOrWhiteSpace(solutionPath)
+                || !solutionPath.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)
+                || !File.Exists(solutionPath))
             {
-                // Solution path can be pointing to a folder not just a .sln file in Open Folder scenario, so we need to check if it's a directory first
-                solutionDir = Directory.Exists(solutionPath)
-                    ? solutionPath // Open Folder scenario where FullPath is a directory
-                    : Path.GetDirectoryName(solutionPath);
-                // Try git repo root first (highest priority)
-                var gitRoot = FindGitRoot(solutionDir);
-                if (gitRoot != null)
+                yield break;
+            }
+
+            var solutionDirectory = Path.GetDirectoryName(solutionPath);
+            if (string.IsNullOrEmpty(solutionDirectory))
+            {
+                yield break;
+            }
+
+            var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            IEnumerable<string> lines;
+            try
+            {
+                lines = File.ReadLines(solutionPath);
+            }
+            catch (IOException)
+            {
+                yield break;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                yield break;
+            }
+
+            foreach (var line in lines)
+            {
+                var projectPath = ExtractProjectPathFromSolutionLine(line);
+                if (string.IsNullOrWhiteSpace(projectPath)
+                    || projectPath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
                 {
-                    return gitRoot;
+                    continue;
+                }
+
+                var candidatePath = Path.IsPathRooted(projectPath)
+                    ? projectPath
+                    : Path.Combine(solutionDirectory, projectPath);
+
+                var projectDirectory = NormalizeToDirectory(candidatePath);
+                if (!string.IsNullOrEmpty(projectDirectory))
+                {
+                    directories.Add(projectDirectory);
                 }
             }
 
-            // Fallback to solution directory
-            if (!string.IsNullOrEmpty(solutionDir) && Directory.Exists(solutionDir))
+            foreach (var directory in directories)
             {
-                return solutionDir;
+                yield return directory;
+            }
+        }
+
+        private static string ExtractProjectPathFromSolutionLine(string line)
+        {
+            if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("Project(", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
             }
 
-            // Fallback to open folder
-            var openFolder = await GetOpenFolderAsync();
-            if (!string.IsNullOrEmpty(openFolder))
+            var firstComma = line.IndexOf(',');
+            if (firstComma < 0)
             {
-                // Also check for git root in open folder
-                var gitRoot = FindGitRoot(openFolder);
-                return gitRoot ?? openFolder;
+                return null;
             }
 
-            return null;
+            var secondComma = line.IndexOf(',', firstComma + 1);
+            if (secondComma < 0)
+            {
+                return null;
+            }
+
+            var pathSegment = line.Substring(firstComma + 1, secondComma - firstComma - 1).Trim();
+            if (pathSegment.Length >= 2 && pathSegment[0] == '"' && pathSegment[pathSegment.Length - 1] == '"')
+            {
+                pathSegment = pathSegment.Substring(1, pathSegment.Length - 2);
+            }
+
+            return pathSegment;
+        }
+
+        private static async Task<string> GetSolutionPathAsync()
+        {
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+            DTE2 dte = await VS.GetServiceAsync<EnvDTE.DTE, DTE2>();
+            if (dte?.Solution == null)
+            {
+                return null;
+            }
+
+            var solutionFullName = dte.Solution.FullName;
+            if (!string.IsNullOrWhiteSpace(solutionFullName))
+            {
+                return solutionFullName;
+            }
+
+            try
+            {
+                return dte.Solution.Properties?.Item("Path")?.Value as string;
+            }
+            catch (COMException)
+            {
+                return null;
+            }
+        }
+
+        private static string NormalizeToDirectory(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return null;
+            }
+
+            if (Directory.Exists(path))
+            {
+                return Path.GetFullPath(path);
+            }
+
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+
+            var directory = Path.GetDirectoryName(path);
+            if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
+            {
+                return null;
+            }
+
+            return Path.GetFullPath(directory);
         }
 
         private async Task<string> GetOpenFolderAsync()
@@ -102,7 +251,7 @@ namespace InstaSearch.Services
                     }
                 }
             }
-            catch
+            catch (COMException)
             {
                 // Ignore errors accessing DTE
             }

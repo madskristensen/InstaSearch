@@ -31,15 +31,16 @@ namespace InstaSearch
         {
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-            // Get the search root
-            var rootPath = await _rootResolver.GetSearchRootAsync();
+            // Get all search roots
+            IReadOnlyList<string> rootPaths = await _rootResolver.GetSearchRootsAsync();
+            var primaryRoot = rootPaths.Count > 0 ? rootPaths[0] : null;
 
             IReadOnlyList<MruItem> mruItems = await _mruService.GetMruItemsAsync();
 
             // Set the workspace root for history (loads history for this workspace) if we have one
-            if (!string.IsNullOrEmpty(rootPath))
+            if (!string.IsNullOrEmpty(primaryRoot))
             {
-                _history.SetWorkspaceRoot(rootPath);
+                _history.SetWorkspaceRoot(primaryRoot);
                 var mruPath = await _rootResolver.GetCurrentWorkspacePathForMruAsync();
                 await _mruService.RecordPathAsync(mruPath);
             }
@@ -58,7 +59,7 @@ namespace InstaSearch
             Window mainWindow = Application.Current.MainWindow;
 
             // Create and show the unified search dialog
-            var dialog = new SearchDialog(_searchService, _mruService, imageService, rootPath, mruItems);
+            var dialog = new SearchDialog(_searchService, _mruService, imageService, rootPaths, mruItems);
 
             if (mainWindow != null)
             {

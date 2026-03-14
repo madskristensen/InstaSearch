@@ -35,8 +35,41 @@ namespace InstaSearch.Services
                 return [];
             }
 
-            // Get indexed files
-            IReadOnlyList<FileEntry> files = await indexer.IndexAsync(rootPath, cancellationToken);
+            return await SearchAsync([rootPath], query, imageService, maxResults, cancellationToken);
+        }
+
+        /// <summary>
+        /// Searches for files matching the query across multiple roots with results ranked by history.
+        /// </summary>
+        /// <param name="rootPaths">The root directories to search in.</param>
+        /// <param name="query">The search query (case-insensitive substring match on file name).</param>
+        /// <param name="imageService">VS image service for getting file icons.</param>
+        /// <param name="maxResults">Maximum number of results to return.</param>
+        /// <param name="cancellationToken">Cancellation token for cancelling the search.</param>
+        /// <returns>List of matching files, ranked by history then alphabetically.</returns>
+        public async Task<IReadOnlyList<SearchResult>> SearchAsync(
+            IReadOnlyList<string> rootPaths,
+            string query,
+            IVsImageService2 imageService,
+            int maxResults = 100,
+            CancellationToken cancellationToken = default)
+        {
+            if (rootPaths == null || rootPaths.Count == 0)
+            {
+                return [];
+            }
+
+            IReadOnlyList<string> normalizedRoots = NormalizeRoots(rootPaths);
+            if (normalizedRoots.Count == 0)
+            {
+                return [];
+            }
+
+            // Get indexed files from all roots and de-duplicate by full path
+            IReadOnlyList<FileEntry>[] indexedByRoot = await Task.WhenAll(
+                normalizedRoots.Select(path => indexer.IndexAsync(path, cancellationToken)));
+
+            IReadOnlyList<FileEntry> files = MergeUniqueFiles(indexedByRoot);
 
             IReadOnlyList<FileEntry> rankedFiles;
 
@@ -125,6 +158,41 @@ namespace InstaSearch.Services
             }
 
             return results;
+        }
+
+        private static IReadOnlyList<string> NormalizeRoots(IReadOnlyList<string> rootPaths)
+        {
+            var normalized = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var rootPath in rootPaths)
+            {
+                if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+                {
+                    continue;
+                }
+
+                normalized.Add(Path.GetFullPath(rootPath));
+            }
+
+            return [.. normalized];
+        }
+
+        private static IReadOnlyList<FileEntry> MergeUniqueFiles(IReadOnlyList<IReadOnlyList<FileEntry>> indexedByRoot)
+        {
+            var merged = new Dictionary<string, FileEntry>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (IReadOnlyList<FileEntry> rootFiles in indexedByRoot)
+            {
+                foreach (FileEntry file in rootFiles)
+                {
+                    if (!merged.ContainsKey(file.FullPath))
+                    {
+                        merged[file.FullPath] = file;
+                    }
+                }
+            }
+
+            return [.. merged.Values];
         }
 
         private static ImageMoniker GetMoniker(IVsImageService2 imageService, string fileName)

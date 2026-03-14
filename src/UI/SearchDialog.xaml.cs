@@ -33,7 +33,7 @@ namespace InstaSearch.UI
         private readonly SearchService _searchService;
         private readonly MruService _mruService;
         private readonly IVsImageService2 _imageService;
-        private readonly string _rootPath;
+        private readonly IReadOnlyList<string> _rootPaths;
         private readonly List<MruItem> _mruItems;
         private readonly bool _hasWorkspaceRoot;
         private readonly DispatcherTimer _debounceTimer;
@@ -83,15 +83,15 @@ namespace InstaSearch.UI
         /// </summary>
         public int? SelectedColumnNumber => _selectedColumnNumber;
 
-        public SearchDialog(SearchService searchService, MruService mruService, IVsImageService2 imageService, string rootPath, IReadOnlyList<MruItem> mruItems)
+        public SearchDialog(SearchService searchService, MruService mruService, IVsImageService2 imageService, IReadOnlyList<string> rootPaths, IReadOnlyList<MruItem> mruItems)
         {
             InitializeComponent();
             _searchService = searchService;
             _mruService = mruService;
             _imageService = imageService;
-            _rootPath = rootPath;
+            _rootPaths = rootPaths?.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray() ?? [];
             _mruItems = mruItems != null ? [.. mruItems] : [];
-            _hasWorkspaceRoot = !string.IsNullOrEmpty(rootPath);
+            _hasWorkspaceRoot = _rootPaths.Count > 0;
 
             PlaceholderText.Text = _hasWorkspaceRoot
                 ? "Search files and recent solutions/folders (use .ext -.ext \\path\\ to filter)"
@@ -229,7 +229,7 @@ namespace InstaSearch.UI
                 IReadOnlyList<SearchResult> fileResults = [];
                 if (_hasWorkspaceRoot)
                 {
-                    fileResults = await _searchService.SearchAsync(_rootPath, searchQuery, _imageService, 100, token);
+                    fileResults = await _searchService.SearchAsync(_rootPaths, searchQuery, _imageService, 100, token);
                     combinedResults.AddRange(fileResults.Select(SearchDialogItem.FromFile));
                 }
 
@@ -461,7 +461,11 @@ namespace InstaSearch.UI
             }
 
             // Invalidate cache and re-search
-            _searchService.RefreshIndex(_rootPath);
+            foreach (var rootPath in _rootPaths)
+            {
+                _searchService.RefreshIndex(rootPath);
+            }
+
             PerformSearchAsync(SearchTextBox.Text).FireAndForget();
             SearchTextBox.Focus();
         }
