@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -298,15 +299,21 @@ namespace InstaSearch.UI
                 List<SearchDialogItem> combinedResults = [];
 
                 List<MruItem> mruResults = FilterMruItems(searchQuery);
+                List<MruItem> visibleMruResults = mruResults;
 
                 IReadOnlyList<SearchResult> fileResults = [];
                 if (_hasWorkspaceRoot)
                 {
                     fileResults = await _searchService.SearchAsync(_rootPaths, searchQuery, _imageService, 100, token);
                     combinedResults.AddRange(fileResults.Select(SearchDialogItem.FromFile));
+
+                    if (mruResults.Count > 0)
+                    {
+                        visibleMruResults = FilterMruDuplicates(fileResults, mruResults);
+                    }
                 }
 
-                combinedResults.AddRange(mruResults.Select(SearchDialogItem.FromMru));
+                combinedResults.AddRange(visibleMruResults.Select(SearchDialogItem.FromMru));
 
                 if (!token.IsCancellationRequested)
                 {
@@ -322,7 +329,7 @@ namespace InstaSearch.UI
                                 ? $" (line {lineNumber}, col {columnNumber})"
                                 : $" (line {lineNumber})"
                             : "";
-                        StatusText.Text = BuildStatusText(fileResults.Count, mruResults.Count, lineInfo);
+                        StatusText.Text = BuildStatusText(fileResults.Count, visibleMruResults.Count, lineInfo);
                     }
                     else
                     {
@@ -571,6 +578,92 @@ namespace InstaSearch.UI
                     item.DisplayNameLower.Contains(queryLower) ||
                     item.FullPath.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0)
             ];
+        }
+
+        private List<MruItem> FilterMruDuplicates(IReadOnlyList<SearchResult> fileResults, IReadOnlyList<MruItem> mruResults)
+        {
+            var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (SearchResult result in fileResults)
+            {
+                string normalizedPath = NormalizePathForComparison(result.FullPath);
+                if (!string.IsNullOrEmpty(normalizedPath))
+                {
+                    seenPaths.Add(normalizedPath);
+                }
+            }
+
+            var filteredMru = new List<MruItem>(mruResults.Count);
+            foreach (MruItem item in mruResults)
+            {
+                string normalizedPath = NormalizePathForComparison(item.FullPath);
+                if (string.IsNullOrEmpty(normalizedPath) || seenPaths.Add(normalizedPath))
+                {
+                    filteredMru.Add(item);
+                }
+            }
+
+            return filteredMru;
+        }
+
+        private static string NormalizePathForComparison(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return null;
+            }
+
+            var normalizedPath = Environment.ExpandEnvironmentVariables(path.Trim().Trim('"'))
+                .Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+
+            if (Uri.TryCreate(normalizedPath, UriKind.Absolute, out var uri) && uri.IsFile)
+            {
+                normalizedPath = uri.LocalPath;
+            }
+
+            if (Path.IsPathRooted(normalizedPath))
+            {
+                try
+                {
+                    normalizedPath = Path.GetFullPath(normalizedPath);
+                }
+                catch (ArgumentException)
+                {
+                }
+                catch (NotSupportedException)
+                {
+                }
+            }
+
+            return TrimTrailingDirectorySeparators(normalizedPath);
+        }
+
+        private static string TrimTrailingDirectorySeparators(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                return path;
+            }
+
+            var root = Path.GetPathRoot(path);
+            var result = path;
+
+            while (result.Length > 0 && IsDirectorySeparator(result[result.Length - 1]))
+            {
+                if (!string.IsNullOrEmpty(root) && result.Length <= root.Length)
+                {
+                    break;
+                }
+
+                result = result.Substring(0, result.Length - 1);
+            }
+
+            return result;
+        }
+
+        private static bool IsDirectorySeparator(char c)
+        {
+            return c == Path.DirectorySeparatorChar || c == Path.AltDirectorySeparatorChar;
         }
 
         private void ResultsContextMenu_Opened(object sender, RoutedEventArgs e)

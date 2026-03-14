@@ -68,6 +68,7 @@ General.Instance.Save(); // Save options
 | Settings not persisting | Call `.Save()` after changes |
 | Error List line numbers | API is 0-based, most tools output 1-based |
 | External process hangs | Use async process with cancellation |
+| Deduplication of search results | Before adding deduplication logic, verify whether similarly named results are actually distinct files on disk. |
 
 ## External Processes
 
@@ -92,3 +93,7 @@ Follow `.editorconfig` rules. Match surrounding code style.
 ## Search Dialog Guidelines
 
 - Use a single universal placeholder string in the search dialog and do not update it dynamically after open.
+
+## Deduplication Guidelines
+
+- When deduplicating combined MRU and workspace search results, compare canonical full file paths (after resolving relative paths) instead of raw path strings.
