@@ -20,6 +20,7 @@ namespace InstaSearch.UI
     {
         private const int _debounceDelayMs = 50;
         private const int _busyDebounceDelayMs = 125;
+        private const string _placeholderText = "Search files and recent solutions/folders";
 
         // Regex to match :lineNumber or :lineNumber:columnNumber at the end of the query (e.g., "file.cs:42" or "file.cs:42:13")
         private static readonly Regex _lineNumberPattern = new(@":(\d+)(?::(\d+))?$", RegexOptions.Compiled);
@@ -33,10 +34,13 @@ namespace InstaSearch.UI
 
         private readonly SearchService _searchService;
         private readonly MruService _mruService;
-        private readonly IVsImageService2 _imageService;
-        private readonly IReadOnlyList<string> _rootPaths;
-        private readonly List<MruItem> _mruItems;
-        private readonly bool _hasWorkspaceRoot;
+        private readonly System.Threading.Tasks.Task<IReadOnlyList<string>> _rootPathsTask;
+        private readonly System.Threading.Tasks.Task<IReadOnlyList<MruItem>> _mruItemsTask;
+        private readonly System.Threading.Tasks.Task<IVsImageService2> _imageServiceTask;
+        private IVsImageService2 _imageService;
+        private IReadOnlyList<string> _rootPaths = [];
+        private readonly List<MruItem> _mruItems = [];
+        private bool _hasWorkspaceRoot;
         private readonly DispatcherTimer _debounceTimer;
         private CancellationTokenSource _searchCts;
         private List<SearchResult> _selectedResults = [];
@@ -44,6 +48,7 @@ namespace InstaSearch.UI
         private int? _selectedLineNumber;
         private int? _selectedColumnNumber;
         private int _activeSearchCount;
+        private bool _isInitialized;
         private bool _isClosing;
         private bool _isContextMenuOpen;
 
@@ -85,23 +90,47 @@ namespace InstaSearch.UI
         /// </summary>
         public int? SelectedColumnNumber => _selectedColumnNumber;
 
-        public SearchDialog(SearchService searchService, MruService mruService, IVsImageService2 imageService, IReadOnlyList<string> rootPaths, IReadOnlyList<MruItem> mruItems)
+        public SearchDialog(
+            SearchService searchService,
+            MruService mruService,
+            System.Threading.Tasks.Task<IReadOnlyList<string>> rootPathsTask,
+            System.Threading.Tasks.Task<IReadOnlyList<MruItem>> mruItemsTask,
+            System.Threading.Tasks.Task<IVsImageService2> imageServiceTask)
         {
+            if (searchService == null)
+            {
+                throw new ArgumentNullException(nameof(searchService));
+            }
+
+            if (mruService == null)
+            {
+                throw new ArgumentNullException(nameof(mruService));
+            }
+
+            if (rootPathsTask == null)
+            {
+                throw new ArgumentNullException(nameof(rootPathsTask));
+            }
+
+            if (mruItemsTask == null)
+            {
+                throw new ArgumentNullException(nameof(mruItemsTask));
+            }
+
+            if (imageServiceTask == null)
+            {
+                throw new ArgumentNullException(nameof(imageServiceTask));
+            }
+
             InitializeComponent();
             _searchService = searchService;
             _mruService = mruService;
-            _imageService = imageService;
-            _rootPaths = rootPaths?.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray() ?? [];
-            _mruItems = mruItems != null ? [.. mruItems] : [];
-            _hasWorkspaceRoot = _rootPaths.Count > 0;
+            _rootPathsTask = rootPathsTask;
+            _mruItemsTask = mruItemsTask;
+            _imageServiceTask = imageServiceTask;
 
-            PlaceholderText.Text = _hasWorkspaceRoot
-                ? "Search files and recent solutions/folders (use .ext -.ext \\path\\ to filter)"
-                : "Search recent solutions and folders";
-
-            RefreshLinkContainer.Visibility = _hasWorkspaceRoot
-                ? Visibility.Visible
-                : Visibility.Collapsed;
+            PlaceholderText.Text = _placeholderText;
+            RefreshLinkContainer.Visibility = Visibility.Visible;
 
             // Restore saved window size
             General settings = General.Instance;
@@ -131,9 +160,41 @@ namespace InstaSearch.UI
         private void SearchDialog_Loaded(object sender, RoutedEventArgs e)
         {
             SearchTextBox.Focus();
+            InitializeDataAsync().FireAndForget();
+        }
 
-            // Trigger initial search to show history items
-            PerformSearchAsync(string.Empty).FireAndForget();
+        private async Task InitializeDataAsync()
+        {
+            try
+            {
+                IReadOnlyList<string> rootPaths = await _rootPathsTask;
+                IReadOnlyList<MruItem> mruItems = await _mruItemsTask;
+
+                _imageService = await _imageServiceTask;
+                _rootPaths = rootPaths
+                    ?.Where(path => !string.IsNullOrWhiteSpace(path))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray() ?? [];
+
+                _mruItems.Clear();
+                if (mruItems != null)
+                {
+                    _mruItems.AddRange(mruItems);
+                }
+
+                _hasWorkspaceRoot = _rootPaths.Count > 0;
+                _isInitialized = true;
+
+                RefreshLinkContainer.Visibility = _hasWorkspaceRoot
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+
+                await PerformSearchAsync(SearchTextBox.Text ?? string.Empty);
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Error: {ex.Message}";
+            }
         }
 
         private void SearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -143,8 +204,14 @@ namespace InstaSearch.UI
                 ? Visibility.Visible
                 : Visibility.Collapsed;
 
-            // Debounce: restart timer on each keystroke
             _pendingQuery = SearchTextBox.Text;
+
+            if (!_isInitialized)
+            {
+                return;
+            }
+
+            // Debounce: restart timer on each keystroke
             _debounceTimer.Interval = TimeSpan.FromMilliseconds(Interlocked.CompareExchange(ref _activeSearchCount, 0, 0) > 0
                 ? _busyDebounceDelayMs
                 : _debounceDelayMs);

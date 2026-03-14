@@ -20,6 +20,7 @@ namespace InstaSearch
         private static readonly SearchService _searchService = new(_indexer, _history, GetIgnoredFilePatterns);
         private static readonly SearchRootResolver _rootResolver = new();
         private static readonly MruService _mruService = new();
+        private static IVsImageService2 _imageService;
         private static RatingPrompt _ratingPrompt;
         private static int _warmupStarted;
 
@@ -33,23 +34,6 @@ namespace InstaSearch
         {
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-            // Get all search roots
-            IReadOnlyList<string> rootPaths = await _rootResolver.GetSearchRootsAsync();
-            var primaryRoot = rootPaths.Count > 0 ? rootPaths[0] : null;
-
-            IReadOnlyList<MruItem> mruItems = await _mruService.GetMruItemsAsync();
-
-            // Set the workspace root for history (loads history for this workspace) if we have one
-            if (!string.IsNullOrEmpty(primaryRoot))
-            {
-                _history.SetWorkspaceRoot(primaryRoot);
-                var mruPath = await _rootResolver.GetCurrentWorkspacePathForMruAsync();
-                await _mruService.RecordPathAsync(mruPath);
-            }
-
-            // Get the image service for file icons
-            IVsImageService2 imageService = await VS.GetServiceAsync<SVsImageService, IVsImageService2>();
-
             // If dialog is already open, just activate it
             if (_openDialog != null)
             {
@@ -57,11 +41,49 @@ namespace InstaSearch
                 return;
             }
 
+            var rootPathsTask = _rootResolver.GetSearchRootsAsync();
+            var mruItemsTask = _mruService.GetMruItemsAsync();
+            var imageServiceTask = _imageService != null
+                ? Task.FromResult(_imageService)
+                : GetImageServiceAsync();
+
+            _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            {
+                try
+                {
+                    _imageService ??= await imageServiceTask;
+                }
+                catch (Exception ex)
+                {
+                    await ex.LogAsync();
+                }
+            });
+
+            _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            {
+                try
+                {
+                    IReadOnlyList<string> rootPaths = await rootPathsTask;
+                    var primaryRoot = rootPaths.Count > 0 ? rootPaths[0] : null;
+
+                    if (!string.IsNullOrEmpty(primaryRoot))
+                    {
+                        _history.SetWorkspaceRoot(primaryRoot);
+                        var mruPath = await _rootResolver.GetCurrentWorkspacePathForMruAsync();
+                        await _mruService.RecordPathAsync(mruPath);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    await ex.LogAsync();
+                }
+            });
+
             // Get the main VS window for positioning
             Window mainWindow = Application.Current.MainWindow;
 
             // Create and show the unified search dialog
-            var dialog = new SearchDialog(_searchService, _mruService, imageService, rootPaths, mruItems);
+            var dialog = new SearchDialog(_searchService, _mruService, rootPathsTask, mruItemsTask, imageServiceTask);
 
             if (mainWindow != null)
             {
@@ -76,6 +98,17 @@ namespace InstaSearch
             _openDialog = dialog;
 
             dialog.ShowDialog();
+        }
+
+        private static async System.Threading.Tasks.Task<IVsImageService2> GetImageServiceAsync()
+        {
+            IVsImageService2 imageService = await VS.GetServiceAsync<SVsImageService, IVsImageService2>();
+            if (imageService == null)
+            {
+                throw new InvalidOperationException("Unable to retrieve Visual Studio image service.");
+            }
+
+            return imageService;
         }
 
         /// <summary>

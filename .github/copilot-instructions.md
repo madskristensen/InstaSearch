@@ -34,6 +34,7 @@ When corrected or a non-obvious pattern emerges, suggest adding to Common Gotcha
 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
 // NEVER use .Result, .Wait(), or Task.Run for UI work - causes deadlocks
+// Avoid using .Result sync-over-async; prefer fully async flows and complete background tasks after UI is rendered
 // NEVER use async void - use async Task
 ```
 
@@ -87,3 +88,7 @@ var psi = new ProcessStartInfo(exe, args) {
 ## Code Style
 
 Follow `.editorconfig` rules. Match surrounding code style.
+
+## Search Dialog Guidelines
+
+- Use a single universal placeholder string in the search dialog and do not update it dynamically after open.
