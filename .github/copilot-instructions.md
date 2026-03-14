@@ -58,6 +58,11 @@ var doc = await VS.Documents.GetActiveDocumentViewAsync();
 General.Instance.Save(); // Save options
 ```
 
+## Custom Dialogs
+
+- Ensure custom dialogs in this VSIX are fully themed, including title bar/chrome and button styling, not only the content area.
+- Ensure checkbox controls in custom VSIX dialogs are themed consistently with Visual Studio colors.
+
 ## Common Gotchas
 
 | Issue | Fix |

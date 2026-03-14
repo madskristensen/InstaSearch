@@ -46,6 +46,12 @@ namespace InstaSearch.Options
         [DefaultValue(true)]
         public bool TakeOverGoToAll { get; set; } = true;
 
+        [Category("MRU")]
+        [DisplayName("Confirm workspace switch from recent items")]
+        [Description("When true, selecting a recent solution/project/folder while a workspace is loaded prompts for confirmation before switching.")]
+        [DefaultValue(true)]
+        public bool ConfirmMruWorkspaceSwitch { get; set; } = true;
+
 
         [Browsable(false)]
         public int RatingRequests { get; set; }
