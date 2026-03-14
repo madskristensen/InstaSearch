@@ -36,6 +36,7 @@ namespace InstaSearch.Services
         private readonly ConcurrentDictionary<string, FileSystemWatcher> _watchers = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, bool> _dirtyFlags = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, SemaphoreSlim> _indexSemaphores = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, object> _cacheUpdateLocks = new(StringComparer.OrdinalIgnoreCase);
         private bool _disposed;
 
         /// <summary>
@@ -133,6 +134,7 @@ namespace InstaSearch.Services
                 var normalizedPath = Path.GetFullPath(rootPath);
                 _cache.TryRemove(normalizedPath, out _);
                 _dirtyFlags.TryRemove(normalizedPath, out _);
+                _cacheUpdateLocks.TryRemove(normalizedPath, out _);
                 StopWatching(normalizedPath);
             }
         }
@@ -174,7 +176,14 @@ namespace InstaSearch.Services
         {
             if (sender is FileSystemWatcher watcher)
             {
-                OnFileChanged(watcher.Path, e.FullPath);
+                if (e.ChangeType == WatcherChangeTypes.Created)
+                {
+                    OnFileCreated(watcher.Path, e.FullPath);
+                }
+                else if (e.ChangeType == WatcherChangeTypes.Deleted)
+                {
+                    OnFileDeleted(watcher.Path, e.FullPath);
+                }
             }
         }
 
@@ -182,7 +191,7 @@ namespace InstaSearch.Services
         {
             if (sender is FileSystemWatcher watcher)
             {
-                OnFileChanged(watcher.Path, e.FullPath);
+                OnFileRenamed(watcher.Path, e.OldFullPath, e.FullPath);
             }
         }
 
@@ -194,14 +203,155 @@ namespace InstaSearch.Services
             }
         }
 
-        private void OnFileChanged(string rootPath, string fullPath)
+        private void OnFileCreated(string rootPath, string fullPath)
         {
             // Ignore changes in excluded directories (optimized to reduce allocations)
             if (IsInIgnoredDirectory(rootPath, fullPath, GetIgnoredFilter()))
                 return;
 
-            // Mark cache as dirty - will re-index on next search
-            MarkDirty(rootPath);
+            if (!TryApplyCreatedFileUpdate(rootPath, fullPath))
+            {
+                MarkDirty(rootPath);
+            }
+        }
+
+        private void OnFileDeleted(string rootPath, string fullPath)
+        {
+            if (IsInIgnoredDirectory(rootPath, fullPath, GetIgnoredFilter()))
+                return;
+
+            if (!TryApplyDeletedFileUpdate(rootPath, fullPath))
+            {
+                MarkDirty(rootPath);
+            }
+        }
+
+        private void OnFileRenamed(string rootPath, string oldFullPath, string newFullPath)
+        {
+            if (IsInIgnoredDirectory(rootPath, oldFullPath, GetIgnoredFilter())
+                && IsInIgnoredDirectory(rootPath, newFullPath, GetIgnoredFilter()))
+            {
+                return;
+            }
+
+            if (!TryApplyRenamedFileUpdate(rootPath, oldFullPath, newFullPath))
+            {
+                MarkDirty(rootPath);
+            }
+        }
+
+        private bool TryApplyCreatedFileUpdate(string rootPath, string fullPath)
+        {
+            if (!File.Exists(fullPath))
+            {
+                return false;
+            }
+
+            object updateLock = _cacheUpdateLocks.GetOrAdd(rootPath, _ => new object());
+
+            lock (updateLock)
+            {
+                if (!_cache.TryGetValue(rootPath, out IReadOnlyList<FileEntry> cached) || IsDirty(rootPath))
+                {
+                    return false;
+                }
+
+                if (cached.Any(entry => string.Equals(entry.FullPath, fullPath, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return true;
+                }
+
+                var updated = new List<FileEntry>(cached.Count + 1);
+                updated.AddRange(cached);
+                updated.Add(new FileEntry(Path.GetFileName(fullPath), fullPath, GetRelativePath(rootPath, fullPath)));
+                _cache[rootPath] = updated;
+                return true;
+            }
+        }
+
+        private bool TryApplyDeletedFileUpdate(string rootPath, string fullPath)
+        {
+            object updateLock = _cacheUpdateLocks.GetOrAdd(rootPath, _ => new object());
+
+            lock (updateLock)
+            {
+                if (!_cache.TryGetValue(rootPath, out IReadOnlyList<FileEntry> cached) || IsDirty(rootPath))
+                {
+                    return false;
+                }
+
+                var existingIndex = -1;
+                for (var i = 0; i < cached.Count; i++)
+                {
+                    if (string.Equals(cached[i].FullPath, fullPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        existingIndex = i;
+                        break;
+                    }
+                }
+
+                if (existingIndex < 0)
+                {
+                    return true;
+                }
+
+                var updated = new List<FileEntry>(cached.Count - 1);
+                for (var i = 0; i < cached.Count; i++)
+                {
+                    if (i != existingIndex)
+                    {
+                        updated.Add(cached[i]);
+                    }
+                }
+
+                _cache[rootPath] = updated;
+                return true;
+            }
+        }
+
+        private bool TryApplyRenamedFileUpdate(string rootPath, string oldFullPath, string newFullPath)
+        {
+            if (!File.Exists(newFullPath))
+            {
+                return false;
+            }
+
+            object updateLock = _cacheUpdateLocks.GetOrAdd(rootPath, _ => new object());
+
+            lock (updateLock)
+            {
+                if (!_cache.TryGetValue(rootPath, out IReadOnlyList<FileEntry> cached) || IsDirty(rootPath))
+                {
+                    return false;
+                }
+
+                var updated = new List<FileEntry>(cached.Count);
+                var removed = false;
+                foreach (FileEntry entry in cached)
+                {
+                    if (string.Equals(entry.FullPath, oldFullPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        removed = true;
+                        continue;
+                    }
+
+                    if (string.Equals(entry.FullPath, newFullPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    updated.Add(entry);
+                }
+
+                if (!removed)
+                {
+                    return false;
+                }
+
+                updated.Add(new FileEntry(Path.GetFileName(newFullPath), newFullPath, GetRelativePath(rootPath, newFullPath)));
+                _cache[rootPath] = updated;
+                return true;
+            }
         }
 
         private void StopWatching(string rootPath)
@@ -293,6 +443,7 @@ namespace InstaSearch.Services
             }
 
             _indexSemaphores.Clear();
+            _cacheUpdateLocks.Clear();
         }
 
         #endregion

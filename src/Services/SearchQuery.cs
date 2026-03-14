@@ -82,12 +82,12 @@ namespace InstaSearch.Services
                     excludeExt ??= [];
                     excludeExt.Add(part.Substring(1)); // store as ".xaml"
                 }
-                // Path filter: starts and ends with \ (e.g., "\src\")
-                else if (part.Length >= 3 && part[0] == '\\' && part[part.Length - 1] == '\\')
+                // Path filter: starts and ends with slash (e.g., "\src\" or "/src/")
+                else if (part.Length >= 3 && IsPathSeparator(part[0]) && IsPathSeparator(part[part.Length - 1]))
                 {
                     pathFilters ??= [];
-                    // Store with separators for IndexOf matching (e.g., "\src\")
-                    pathFilters.Add(part);
+                    // Normalize separators and ensure a leading/trailing separator for robust segment matching.
+                    pathFilters.Add(NormalizePathFilter(part));
                 }
                 // Include extension: starts with "." and has no wildcards (e.g., ".cs")
                 else if (part[0] == '.' && !part.Contains("*"))
@@ -161,6 +161,33 @@ namespace InstaSearch.Services
             }
 
             return true;
+        }
+
+        private static bool IsPathSeparator(char c)
+        {
+            return c == '\\' || c == '/';
+        }
+
+        private static string NormalizePathFilter(string filter)
+        {
+            if (string.IsNullOrEmpty(filter))
+            {
+                return string.Empty;
+            }
+
+            var normalized = filter.Replace('/', '\\');
+
+            if (normalized[0] != '\\')
+            {
+                normalized = "\\" + normalized;
+            }
+
+            if (normalized[normalized.Length - 1] != '\\')
+            {
+                normalized += "\\";
+            }
+
+            return normalized;
         }
     }
 }

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -13,6 +14,13 @@ namespace InstaSearch.Services
     /// </summary>
     public class SearchService(FileIndexer indexer, SearchHistoryService history, Func<IReadOnlyList<string>> getIgnoredFilePatterns = null)
     {
+        private static readonly int _maxParallelRootIndexing = Math.Max(1, Math.Min(4, Environment.ProcessorCount));
+        private readonly SemaphoreSlim _rootIndexGate = new(_maxParallelRootIndexing, _maxParallelRootIndexing);
+        private readonly ConcurrentDictionary<string, ImageMoniker> _monikerByExtension = new(StringComparer.OrdinalIgnoreCase);
+        private readonly object _ignoredPatternCacheLock = new();
+        private string[] _cachedIgnoredPatternSource = [];
+        private CompiledIgnoredPattern[] _cachedIgnoredPatterns = [];
+
 
         /// <summary>
         /// Searches for files matching the query with results ranked by history.
@@ -67,7 +75,7 @@ namespace InstaSearch.Services
 
             // Get indexed files from all roots and de-duplicate by full path
             IReadOnlyList<FileEntry>[] indexedByRoot = await Task.WhenAll(
-                normalizedRoots.Select(path => indexer.IndexAsync(path, cancellationToken)));
+                normalizedRoots.Select(path => IndexRootWithGateAsync(path, cancellationToken)));
 
             IReadOnlyList<FileEntry> files = MergeUniqueFiles(indexedByRoot);
 
@@ -75,7 +83,7 @@ namespace InstaSearch.Services
 
             // Parse query into core text + optional extension/path filters (once per keystroke)
             var searchQuery = SearchQuery.Parse(query);
-            IReadOnlyList<string> ignoredPatterns = getIgnoredFilePatterns?.Invoke() ?? [];
+            CompiledIgnoredPattern[] ignoredPatterns = GetCompiledIgnoredPatterns();
             var historyScoreCache = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
             int GetSelectionCountCached(string fullPath)
@@ -99,7 +107,7 @@ namespace InstaSearch.Services
                     f =>
                     {
                         var score = GetSelectionCountCached(f.FullPath);
-                        return new RankedFile(f, score, false, false, IsCodeFile(f.FileName), f.FileNameLower.Length);
+                        return new RankedFile(f, score, false, false, IsCodeFile(f), f.FileNameLower.Length);
                     },
                     maxResults);
 
@@ -109,7 +117,7 @@ namespace InstaSearch.Services
                 var historyResults = new List<SearchResult>(rankedFiles.Count);
                 foreach (FileEntry f in rankedFiles)
                 {
-                    historyResults.Add(new SearchResult(f, GetSelectionCountCached(f.FullPath), GetMoniker(imageService, f.FileName), string.Empty));
+                    historyResults.Add(new SearchResult(f, GetSelectionCountCached(f.FullPath), GetMonikerCached(imageService, f.FileName), string.Empty));
                 }
                 return historyResults;
             }
@@ -124,7 +132,7 @@ namespace InstaSearch.Services
                     f =>
                     {
                         var score = GetSelectionCountCached(f.FullPath);
-                        return new RankedFile(f, score, false, false, IsCodeFile(f.FileName), f.FileNameLower.Length);
+                        return new RankedFile(f, score, false, false, IsCodeFile(f), f.FileNameLower.Length);
                     },
                     maxResults);
             }
@@ -141,7 +149,7 @@ namespace InstaSearch.Services
                         f =>
                         {
                             var score = GetSelectionCountCached(f.FullPath);
-                            return new RankedFile(f, score, false, wildcardPattern.StartsWithFirstSegment(f.FileNameLower), IsCodeFile(f.FileName), f.FileNameLower.Length);
+                            return new RankedFile(f, score, false, wildcardPattern.StartsWithFirstSegment(f.FileNameLower), IsCodeFile(f), f.FileNameLower.Length);
                         },
                         maxResults);
                 }
@@ -152,7 +160,7 @@ namespace InstaSearch.Services
                         f =>
                         {
                             var score = GetSelectionCountCached(f.FullPath);
-                            return new RankedFile(f, score, false, wildcardPattern.StartsWithFirstSegment(f.FileNameLower), IsCodeFile(f.FileName), f.FileNameLower.Length);
+                            return new RankedFile(f, score, false, wildcardPattern.StartsWithFirstSegment(f.FileNameLower), IsCodeFile(f), f.FileNameLower.Length);
                         },
                         maxResults);
                 }
@@ -167,7 +175,7 @@ namespace InstaSearch.Services
                         f =>
                         {
                             var score = GetSelectionCountCached(f.FullPath);
-                            return new RankedFile(f, score, IsExactFileNameMatch(f.FileNameLower, queryLower), f.FileNameLower.StartsWith(queryLower, StringComparison.Ordinal), IsCodeFile(f.FileName), f.FileNameLower.Length);
+                            return new RankedFile(f, score, IsExactFileNameMatch(f.FileNameLower, queryLower), f.FileNameLower.StartsWith(queryLower, StringComparison.Ordinal), IsCodeFile(f), f.FileNameLower.Length);
                         },
                         maxResults);
                 }
@@ -178,7 +186,7 @@ namespace InstaSearch.Services
                         f =>
                         {
                             var score = GetSelectionCountCached(f.FullPath);
-                            return new RankedFile(f, score, IsExactFileNameMatch(f.FileNameLower, queryLower), f.FileNameLower.StartsWith(queryLower, StringComparison.Ordinal), IsCodeFile(f.FileName), f.FileNameLower.Length);
+                            return new RankedFile(f, score, IsExactFileNameMatch(f.FileNameLower, queryLower), f.FileNameLower.StartsWith(queryLower, StringComparison.Ordinal), IsCodeFile(f), f.FileNameLower.Length);
                         },
                         maxResults);
                 }
@@ -192,10 +200,88 @@ namespace InstaSearch.Services
             var results = new List<SearchResult>(rankedFiles.Count);
             foreach (FileEntry f in rankedFiles)
             {
-                results.Add(new SearchResult(f, GetSelectionCountCached(f.FullPath), GetMoniker(imageService, f.FileName), queryLower));
+                results.Add(new SearchResult(f, GetSelectionCountCached(f.FullPath), GetMonikerCached(imageService, f.FileName), queryLower));
             }
 
             return results;
+        }
+
+        private async Task<IReadOnlyList<FileEntry>> IndexRootWithGateAsync(string rootPath, CancellationToken cancellationToken)
+        {
+            await _rootIndexGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                return await indexer.IndexAsync(rootPath, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _rootIndexGate.Release();
+            }
+        }
+
+        private CompiledIgnoredPattern[] GetCompiledIgnoredPatterns()
+        {
+            IReadOnlyList<string> patterns = getIgnoredFilePatterns?.Invoke() ?? [];
+
+            lock (_ignoredPatternCacheLock)
+            {
+                if (ArePatternSetsEqual(patterns, _cachedIgnoredPatternSource))
+                {
+                    return _cachedIgnoredPatterns;
+                }
+
+                var normalizedPatterns = new string[patterns.Count];
+                var compiledPatterns = new List<CompiledIgnoredPattern>(patterns.Count);
+
+                for (var i = 0; i < patterns.Count; i++)
+                {
+                    var pattern = patterns[i] ?? string.Empty;
+                    normalizedPatterns[i] = pattern;
+
+                    CompiledIgnoredPattern compiledPattern = CompiledIgnoredPattern.Create(pattern);
+                    if (compiledPattern.IsValid)
+                    {
+                        compiledPatterns.Add(compiledPattern);
+                    }
+                }
+
+                _cachedIgnoredPatternSource = normalizedPatterns;
+                _cachedIgnoredPatterns = [.. compiledPatterns];
+                return _cachedIgnoredPatterns;
+            }
+        }
+
+        private static bool ArePatternSetsEqual(IReadOnlyList<string> left, IReadOnlyList<string> right)
+        {
+            if (left.Count != right.Count)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < left.Count; i++)
+            {
+                if (!string.Equals(left[i], right[i], StringComparison.Ordinal))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private ImageMoniker GetMonikerCached(IVsImageService2 imageService, string fileName)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            var extension = Path.GetExtension(fileName) ?? string.Empty;
+            if (_monikerByExtension.TryGetValue(extension, out ImageMoniker moniker))
+            {
+                return moniker;
+            }
+
+            moniker = GetMoniker(imageService, fileName);
+            _monikerByExtension[extension] = moniker;
+            return moniker;
         }
 
         private static IReadOnlyList<string> NormalizeRoots(IReadOnlyList<string> rootPaths)
@@ -345,26 +431,25 @@ namespace InstaSearch.Services
         /// <summary>
         /// Checks if a file is a commonly edited code/text file in Visual Studio.
         /// </summary>
-        private static bool IsCodeFile(string fileName)
+        private static bool IsCodeFile(FileEntry file)
         {
-            var extension = Path.GetExtension(fileName);
-            return _codeExtensions.Contains(extension);
+            return _codeExtensions.Contains(file.Extension);
         }
 
         /// <summary>
         /// Checks if a file should be excluded based on user-configured ignored file patterns.
         /// Patterns support simple wildcards (e.g., *.designer.cs).
         /// </summary>
-        private static bool IsExcludedByPattern(string fileNameLower, IReadOnlyList<string> patterns)
+        private static bool IsExcludedByPattern(string fileNameLower, IReadOnlyList<CompiledIgnoredPattern> patterns)
         {
             if (patterns == null || patterns.Count == 0)
             {
                 return false;
             }
 
-            foreach (var pattern in patterns)
+            foreach (CompiledIgnoredPattern pattern in patterns)
             {
-                if (MatchesSimplePattern(fileNameLower, pattern))
+                if (pattern.Matches(fileNameLower))
                 {
                     return true;
                 }
@@ -373,26 +458,39 @@ namespace InstaSearch.Services
             return false;
         }
 
-        /// <summary>
-        /// Matches a filename against a simple pattern with leading wildcard (e.g., *.designer.cs).
-        /// Supports patterns like: *.ext, *.suffix.ext, exact.name
-        /// </summary>
-        private static bool MatchesSimplePattern(string fileNameLower, string pattern)
+        private readonly struct CompiledIgnoredPattern(string exact, string suffix, bool isWildcard)
         {
-            if (pattern.Length == 0)
+            public readonly string Exact = exact;
+            public readonly string Suffix = suffix;
+            public readonly bool IsWildcard = isWildcard;
+
+            public bool IsValid => !string.IsNullOrEmpty(Exact) || IsWildcard;
+
+            public static CompiledIgnoredPattern Create(string pattern)
             {
-                return false;
+                if (string.IsNullOrEmpty(pattern))
+                {
+                    return new CompiledIgnoredPattern(null, null, false);
+                }
+
+                if (pattern[0] == '*')
+                {
+                    var suffix = pattern.Length > 1 ? pattern.Substring(1) : string.Empty;
+                    return new CompiledIgnoredPattern(null, suffix, true);
+                }
+
+                return new CompiledIgnoredPattern(pattern, null, false);
             }
 
-            if (pattern[0] == '*')
+            public bool Matches(string fileNameLower)
             {
-                // *.designer.cs -> check if filename ends with ".designer.cs"
-                var suffix = pattern.Substring(1);
-                return fileNameLower.EndsWith(suffix, StringComparison.Ordinal);
-            }
+                if (IsWildcard)
+                {
+                    return fileNameLower.EndsWith(Suffix, StringComparison.Ordinal);
+                }
 
-            // Exact match
-            return fileNameLower.Equals(pattern, StringComparison.Ordinal);
+                return fileNameLower.Equals(Exact, StringComparison.Ordinal);
+            }
         }
 
         /// <summary>

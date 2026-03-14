@@ -19,6 +19,7 @@ namespace InstaSearch.UI
     public partial class SearchDialog : Window
     {
         private const int _debounceDelayMs = 50;
+        private const int _busyDebounceDelayMs = 125;
 
         // Regex to match :lineNumber or :lineNumber:columnNumber at the end of the query (e.g., "file.cs:42" or "file.cs:42:13")
         private static readonly Regex _lineNumberPattern = new(@":(\d+)(?::(\d+))?$", RegexOptions.Compiled);
@@ -42,6 +43,7 @@ namespace InstaSearch.UI
         private string _pendingQuery;
         private int? _selectedLineNumber;
         private int? _selectedColumnNumber;
+        private int _activeSearchCount;
         private bool _isClosing;
         private bool _isContextMenuOpen;
 
@@ -143,6 +145,9 @@ namespace InstaSearch.UI
 
             // Debounce: restart timer on each keystroke
             _pendingQuery = SearchTextBox.Text;
+            _debounceTimer.Interval = TimeSpan.FromMilliseconds(Interlocked.CompareExchange(ref _activeSearchCount, 0, 0) > 0
+                ? _busyDebounceDelayMs
+                : _debounceDelayMs);
             _debounceTimer.Stop();
             _debounceTimer.Start();
         }
@@ -192,6 +197,7 @@ namespace InstaSearch.UI
             _searchCts?.Cancel();
             _searchCts = new CancellationTokenSource();
             CancellationToken token = _searchCts.Token;
+            Interlocked.Increment(ref _activeSearchCount);
 
             try
             {
@@ -264,6 +270,10 @@ namespace InstaSearch.UI
             catch (Exception ex)
             {
                 StatusText.Text = $"Error: {ex.Message}";
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _activeSearchCount);
             }
         }
 
