@@ -106,13 +106,13 @@ When you invoke Insta Search for the first time in a workspace, it performs a pa
 - `bin`, `obj`, `Debug`, `Release`
 - `node_modules`, `packages`, `.nuget`, `TestResults`
 
-You can customize this list in **Tools > Options > InstaSearch > General**. Wildcard patterns like `*.Migrations` are also supported.
+You can customize this list in **Tools > Options > Environment > InstaSearch > General**. Wildcard patterns like `*.Migrations` are also supported.
 
 The resulting file list is cached in memory. Subsequent searches reuse this cache, making them nearly instant.
 
 ### Options
 
-Configure InstaSearch via **Tools > Options > InstaSearch > General**:
+Configure InstaSearch via **Tools > Options > Environment > InstaSearch > General**:
 
 | Setting               | Description                                                                                                 |
 | --------------------- | ----------------------------------------------------------------------------------------------------------- |
@@ -133,7 +133,7 @@ The interception only occurs when:
 
 Invoking Go To All from the menu (**Edit > Go To > Go To All**) will still open the standard Visual Studio dialog, allowing you to access symbol search and other Go To All features when needed.
 
-To disable this behavior, uncheck **Take over Go To All** in **Tools > Options > InstaSearch > General**.
+To disable this behavior, uncheck **Take over Go To All** in **Tools > Options > Environment > InstaSearch > General**.
 
 ### Live Updates
 
