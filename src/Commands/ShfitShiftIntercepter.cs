@@ -11,7 +11,7 @@ namespace InstaSearch.Commands
         // Max time between two shift taps to trigger search
         private static readonly TimeSpan _doubleTapThreshold = TimeSpan.FromMilliseconds(400);
         // Max duration for a single shift press to count as a "tap" (not a hold for typing)
-        private static readonly TimeSpan _tapMaxDuration = TimeSpan.FromMilliseconds(150);
+        private static readonly TimeSpan _tapMaxDuration = TimeSpan.FromMilliseconds(220);
 
         public static async Task InitializeAsync()
         {
@@ -35,10 +35,12 @@ namespace InstaSearch.Commands
                 return;
             }
 
-            // Only process key down/up events
+            // Only process preview key down/up events so interception still works
+            // when focused controls (such as the editor) handle regular key events.
             var routedEvent = keyArgs.RoutedEvent;
-            bool isDown = routedEvent == Keyboard.KeyDownEvent;
-            if (!isDown && routedEvent != Keyboard.KeyUpEvent)
+            bool isDown = routedEvent == Keyboard.PreviewKeyDownEvent;
+            bool isUp = routedEvent == Keyboard.PreviewKeyUpEvent;
+            if (!isDown && !isUp)
             {
                 return;
             }
@@ -85,11 +87,17 @@ namespace InstaSearch.Commands
                     // Shift going down; only valid if no other modifiers are held
                     _shiftWasAlone = (Keyboard.Modifiers & ~ModifierKeys.Shift) == 0;
                 }
+                else if ((now - _shiftDownTime) > _doubleTapThreshold)
+                {
+                    // Recover from stale state if a key-up was missed.
+                    _shiftDownTime = now;
+                    _shiftWasAlone = (Keyboard.Modifiers & ~ModifierKeys.Shift) == 0;
+                }
             }
             else
             {
                 bool wasQuickTap = _shiftDownTime != DateTime.MinValue &&
-                                   (now - _shiftDownTime) < _tapMaxDuration;
+                                   (now - _shiftDownTime) <= _tapMaxDuration;
 
                 if (_shiftWasAlone && wasQuickTap)
                 {
