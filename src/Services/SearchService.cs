@@ -536,6 +536,25 @@ namespace InstaSearch.Services
         }
 
         /// <summary>
+        /// Pre-indexes the provided roots in the background so first interactive search is faster.
+        /// </summary>
+        public async Task WarmupIndexAsync(IReadOnlyList<string> rootPaths, CancellationToken cancellationToken = default)
+        {
+            if (rootPaths == null || rootPaths.Count == 0)
+            {
+                return;
+            }
+
+            IReadOnlyList<string> normalizedRoots = NormalizeRoots(rootPaths);
+            if (normalizedRoots.Count == 0)
+            {
+                return;
+            }
+
+            await Task.WhenAll(normalizedRoots.Select(path => IndexRootWithGateAsync(path, cancellationToken)));
+        }
+
+        /// <summary>
         /// Invalidates the file cache to force re-indexing.
         /// </summary>
         public void RefreshIndex(string rootPath = null)

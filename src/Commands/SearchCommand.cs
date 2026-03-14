@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Threading;
 using System.Windows;
 using InstaSearch.Options;
 using InstaSearch.Services;
@@ -20,6 +21,7 @@ namespace InstaSearch
         private static readonly SearchRootResolver _rootResolver = new();
         private static readonly MruService _mruService = new();
         private static RatingPrompt _ratingPrompt;
+        private static int _warmupStarted;
 
         private static IgnoredFolderFilter GetIgnoredFolders() => General.Instance.GetIgnoredFolderFilter();
         private static IReadOnlyList<string> GetIgnoredFilePatterns() => General.Instance.GetIgnoredFilePatternsList();
@@ -110,8 +112,43 @@ namespace InstaSearch
                 return;
             }
 
-            _mruService.RecordItemAsync(e.SelectedItem).FireAndForget();
-            OpenMruItemAsync(e.SelectedItem).FireAndForget();
+            _ = ThreadHelper.JoinableTaskFactory.StartOnIdle(async () =>
+            {
+                try
+                {
+                    await _mruService.RecordItemAsync(e.SelectedItem);
+                    await OpenMruItemAsync(e.SelectedItem);
+                }
+                catch (Exception ex)
+                {
+                    await VS.StatusBar.ShowMessageAsync($"Error opening: {ex.Message}");
+                    await ex.LogAsync();
+                }
+            });
+        }
+
+        internal static void StartWarmupIfNeeded(CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Exchange(ref _warmupStarted, 1) != 0)
+            {
+                return;
+            }
+
+            _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            {
+                try
+                {
+                    IReadOnlyList<string> roots = await _rootResolver.GetSearchRootsAsync();
+                    await _searchService.WarmupIndexAsync(roots, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+                catch (Exception ex)
+                {
+                    await ex.LogAsync();
+                }
+            });
         }
 
         private static void OnFilesSelected(object sender, FilesSelectedEventArgs e)

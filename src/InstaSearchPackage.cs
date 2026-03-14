@@ -26,6 +26,7 @@ namespace InstaSearch
         protected override async Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress)
         {
             await this.RegisterCommandsAsync();
+            SearchCommand.StartWarmupIfNeeded(cancellationToken);
             await GoToIntercepter.InitializeAsync();
             await ShfitShiftIntercepter.InitializeAsync();
         }
