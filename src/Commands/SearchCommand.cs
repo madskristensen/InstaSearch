@@ -26,8 +26,13 @@ namespace InstaSearch
         private static readonly SearchService _searchService = new(_indexer, _history, GetIgnoredFilePatterns);
         private static readonly SearchRootResolver _rootResolver = new();
         private static readonly MruService _mruService = new();
+        private static readonly object _imageServiceLock = new();
+        private static readonly System.Threading.Tasks.Task<IReadOnlyList<string>> _emptyRootPathsTask = System.Threading.Tasks.Task.FromResult((IReadOnlyList<string>)Array.Empty<string>());
+        private static readonly System.Threading.Tasks.Task<IReadOnlyList<MruItem>> _emptyMruItemsTask = System.Threading.Tasks.Task.FromResult((IReadOnlyList<MruItem>)Array.Empty<MruItem>());
         private static IVsImageService2 _imageService;
+        private static System.Threading.Tasks.Task<IVsImageService2> _imageServiceTask;
         private static RatingPrompt _ratingPrompt;
+        private static int _dialogShellWarmed;
         private static int _warmupStarted;
 
         private static IgnoredFolderFilter GetIgnoredFolders() => General.Instance.GetIgnoredFolderFilter();
@@ -40,57 +45,38 @@ namespace InstaSearch
         {
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-            // If dialog is already open, just activate it
             if (_openDialog != null)
             {
                 _openDialog.Activate();
                 return;
             }
 
-            var rootPathsTask = _rootResolver.GetSearchRootsAsync();
-            var mruItemsTask = _mruService.GetMruItemsAsync();
-            var imageServiceTask = _imageService != null
-                ? Task.FromResult(_imageService)
-                : GetImageServiceAsync();
+            var prerequisites = CreateDialogPrerequisites();
+            StartWorkspaceTracking(prerequisites.RootPathsTask);
 
-            _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
-            {
-                try
-                {
-                    _imageService ??= await imageServiceTask;
-                }
-                catch (Exception ex)
-                {
-                    await ex.LogAsync();
-                }
-            });
+            var dialog = CreateDialog(prerequisites);
+            _openDialog = dialog;
+            dialog.ShowDialog();
+        }
 
-            _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
-            {
-                try
-                {
-                    IReadOnlyList<string> rootPaths = await rootPathsTask;
-                    var primaryRoot = rootPaths.Count > 0 ? rootPaths[0] : null;
+        private static SearchDialogPrerequisites CreateDialogPrerequisites()
+        {
+            return new SearchDialogPrerequisites(
+                _rootResolver.GetSearchRootsAsync(),
+                _mruService.GetMruItemsAsync(),
+                GetOrCreateImageServiceTask());
+        }
 
-                    if (!string.IsNullOrEmpty(primaryRoot))
-                    {
-                        _history.SetWorkspaceRoot(primaryRoot);
-                        var mruPath = await _rootResolver.GetCurrentWorkspacePathForMruAsync();
-                        await _mruService.RecordPathAsync(mruPath);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    await ex.LogAsync();
-                }
-            });
+        private static SearchDialog CreateDialog(SearchDialogPrerequisites prerequisites)
+        {
+            var dialog = new SearchDialog(
+                _searchService,
+                _mruService,
+                prerequisites.RootPathsTask,
+                prerequisites.MruItemsTask,
+                prerequisites.ImageServiceTask);
 
-            // Get the main VS window for positioning
-            Window mainWindow = Application.Current.MainWindow;
-
-            // Create and show the unified search dialog
-            var dialog = new SearchDialog(_searchService, _mruService, rootPathsTask, mruItemsTask, imageServiceTask);
-
+            Window mainWindow = Application.Current?.MainWindow;
             if (mainWindow != null)
             {
                 dialog.Owner = mainWindow;
@@ -100,10 +86,63 @@ namespace InstaSearch
             dialog.FilesSelected += OnFilesSelected;
             dialog.GoToLineRequested += OnGoToLineRequested;
             dialog.MruItemSelected += OnMruItemSelected;
-            dialog.Closed += (s, args) => _openDialog = null;
-            _openDialog = dialog;
+            dialog.Closed += OnSearchDialogClosed;
+            return dialog;
+        }
 
-            dialog.ShowDialog();
+        private static void OnSearchDialogClosed(object sender, EventArgs e)
+        {
+            _openDialog = null;
+        }
+
+        private static void StartWorkspaceTracking(System.Threading.Tasks.Task<IReadOnlyList<string>> rootPathsTask)
+        {
+            _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            {
+                try
+                {
+                    IReadOnlyList<string> rootPaths = await rootPathsTask;
+                    var primaryRoot = rootPaths.Count > 0 ? rootPaths[0] : null;
+
+                    if (string.IsNullOrEmpty(primaryRoot))
+                    {
+                        return;
+                    }
+
+                    _history.SetWorkspaceRoot(primaryRoot);
+                    var mruPath = await _rootResolver.GetCurrentWorkspacePathForMruAsync();
+                    await _mruService.RecordPathAsync(mruPath);
+                }
+                catch (Exception ex)
+                {
+                    await ex.LogAsync();
+                }
+            });
+        }
+
+        private static System.Threading.Tasks.Task<IVsImageService2> GetOrCreateImageServiceTask()
+        {
+            if (_imageService != null)
+            {
+                return System.Threading.Tasks.Task.FromResult(_imageService);
+            }
+
+            lock (_imageServiceLock)
+            {
+                if (_imageServiceTask == null || _imageServiceTask.IsCanceled || _imageServiceTask.IsFaulted)
+                {
+                    _imageServiceTask = LoadImageServiceAsync();
+                }
+
+                return _imageServiceTask;
+            }
+        }
+
+        private static async System.Threading.Tasks.Task<IVsImageService2> LoadImageServiceAsync()
+        {
+            IVsImageService2 imageService = await GetImageServiceAsync();
+            _imageService = imageService;
+            return imageService;
         }
 
         private static async System.Threading.Tasks.Task<IVsImageService2> GetImageServiceAsync()
@@ -237,11 +276,13 @@ namespace InstaSearch
                 return;
             }
 
+            var prerequisites = CreateDialogPrerequisites();
+
             _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
             {
                 try
                 {
-                    IReadOnlyList<string> roots = await _rootResolver.GetSearchRootsAsync();
+                    IReadOnlyList<string> roots = await prerequisites.RootPathsTask;
                     await _searchService.WarmupIndexAsync(roots, cancellationToken);
                 }
                 catch (OperationCanceledException)
@@ -252,6 +293,45 @@ namespace InstaSearch
                     await ex.LogAsync();
                 }
             });
+
+            _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            {
+                try
+                {
+                    await prerequisites.MruItemsTask;
+                    await prerequisites.ImageServiceTask;
+                    await WarmDialogShellAsync(cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+                catch (Exception ex)
+                {
+                    await ex.LogAsync();
+                }
+            });
+        }
+
+        private static async System.Threading.Tasks.Task WarmDialogShellAsync(CancellationToken cancellationToken)
+        {
+            if (Interlocked.Exchange(ref _dialogShellWarmed, 1) != 0)
+            {
+                return;
+            }
+
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+
+            if (Application.Current == null)
+            {
+                return;
+            }
+
+            _ = new SearchDialog(
+                _searchService,
+                _mruService,
+                _emptyRootPathsTask,
+                _emptyMruItemsTask,
+                GetOrCreateImageServiceTask());
         }
 
         private static void OnFilesSelected(object sender, FilesSelectedEventArgs e)
@@ -740,6 +820,18 @@ namespace InstaSearch
                 DialogResult = false;
                 Close();
             }
+        }
+
+        private sealed class SearchDialogPrerequisites(
+            System.Threading.Tasks.Task<IReadOnlyList<string>> rootPathsTask,
+            System.Threading.Tasks.Task<IReadOnlyList<MruItem>> mruItemsTask,
+            System.Threading.Tasks.Task<IVsImageService2> imageServiceTask)
+        {
+            public System.Threading.Tasks.Task<IReadOnlyList<string>> RootPathsTask { get; } = rootPathsTask;
+
+            public System.Threading.Tasks.Task<IReadOnlyList<MruItem>> MruItemsTask { get; } = mruItemsTask;
+
+            public System.Threading.Tasks.Task<IVsImageService2> ImageServiceTask { get; } = imageServiceTask;
         }
     }
 }
