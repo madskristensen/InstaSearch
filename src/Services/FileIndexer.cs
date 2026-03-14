@@ -35,7 +35,7 @@ namespace InstaSearch.Services
         private readonly ConcurrentDictionary<string, IReadOnlyList<FileEntry>> _cache = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, FileSystemWatcher> _watchers = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, bool> _dirtyFlags = new(StringComparer.OrdinalIgnoreCase);
-        private readonly SemaphoreSlim _indexSemaphore = new(1, 1);
+        private readonly ConcurrentDictionary<string, SemaphoreSlim> _indexSemaphores = new(StringComparer.OrdinalIgnoreCase);
         private bool _disposed;
 
         /// <summary>
@@ -78,8 +78,9 @@ namespace InstaSearch.Services
             }
 
             // Slow path: need to re-index
-            // Use SemaphoreSlim for async-friendly locking to avoid thread pool starvation
-            await _indexSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+            // Use per-root SemaphoreSlim for async-friendly locking without serializing different roots.
+            var rootSemaphore = _indexSemaphores.GetOrAdd(rootPath, _ => new SemaphoreSlim(1, 1));
+            await rootSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 // Double-check after acquiring lock
@@ -102,7 +103,7 @@ namespace InstaSearch.Services
             }
             finally
             {
-                _indexSemaphore.Release();
+                rootSemaphore.Release();
             }
         }
 
@@ -285,7 +286,13 @@ namespace InstaSearch.Services
             StopAllWatching();
             _cache.Clear();
             _dirtyFlags.Clear();
-            _indexSemaphore.Dispose();
+
+            foreach (SemaphoreSlim semaphore in _indexSemaphores.Values)
+            {
+                semaphore.Dispose();
+            }
+
+            _indexSemaphores.Clear();
         }
 
         #endregion

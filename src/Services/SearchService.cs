@@ -75,14 +75,32 @@ namespace InstaSearch.Services
 
             // Parse query into core text + optional extension/path filters (once per keystroke)
             var searchQuery = SearchQuery.Parse(query);
+            IReadOnlyList<string> ignoredPatterns = getIgnoredFilePatterns?.Invoke() ?? [];
+            var historyScoreCache = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+            int GetSelectionCountCached(string fullPath)
+            {
+                if (historyScoreCache.TryGetValue(fullPath, out int score))
+                {
+                    return score;
+                }
+
+                score = history.GetSelectionCount(fullPath);
+                historyScoreCache[fullPath] = score;
+                return score;
+            }
 
             if (searchQuery.Text.Length == 0 && !searchQuery.HasFilters)
             {
                 // Show most recently selected files when query is empty
                 // Use heap-based selection for O(n log k) instead of O(n log n) full sort
                 rankedFiles = SelectTopN(
-                    files.Where(f => history.GetSelectionCount(f.FullPath) > 0 && !IsExcludedByPattern(f.FileNameLower)),
-                    f => new RankedFile(f, history.GetSelectionCount(f.FullPath), false, false, IsCodeFile(f.FileName), f.FileNameLower.Length),
+                    files.Where(f => GetSelectionCountCached(f.FullPath) > 0 && !IsExcludedByPattern(f.FileNameLower, ignoredPatterns)),
+                    f =>
+                    {
+                        var score = GetSelectionCountCached(f.FullPath);
+                        return new RankedFile(f, score, false, false, IsCodeFile(f.FileName), f.FileNameLower.Length);
+                    },
                     maxResults);
 
                 // Empty query - no highlighting needed
@@ -91,7 +109,7 @@ namespace InstaSearch.Services
                 var historyResults = new List<SearchResult>(rankedFiles.Count);
                 foreach (FileEntry f in rankedFiles)
                 {
-                    historyResults.Add(new SearchResult(f, history.GetSelectionCount(f.FullPath), GetMoniker(imageService, f.FileName), string.Empty));
+                    historyResults.Add(new SearchResult(f, GetSelectionCountCached(f.FullPath), GetMoniker(imageService, f.FileName), string.Empty));
                 }
                 return historyResults;
             }
@@ -102,8 +120,12 @@ namespace InstaSearch.Services
             {
                 // Filters only, no text query - show all files matching filters
                 rankedFiles = SelectTopN(
-                    files.Where(f => searchQuery.PassesFilters(f.FileNameLower, f.RelativePathLower) && !IsExcludedByPattern(f.FileNameLower)),
-                    f => new RankedFile(f, history.GetSelectionCount(f.FullPath), false, false, IsCodeFile(f.FileName), f.FileNameLower.Length),
+                    files.Where(f => searchQuery.PassesFilters(f.FileNameLower, f.RelativePathLower) && !IsExcludedByPattern(f.FileNameLower, ignoredPatterns)),
+                    f =>
+                    {
+                        var score = GetSelectionCountCached(f.FullPath);
+                        return new RankedFile(f, score, false, false, IsCodeFile(f.FileName), f.FileNameLower.Length);
+                    },
                     maxResults);
             }
             else if (searchQuery.HasWildcard)
@@ -115,15 +137,23 @@ namespace InstaSearch.Services
                 if (searchQuery.HasFilters)
                 {
                     rankedFiles = SelectTopN(
-                        files.Where(f => wildcardPattern.Matches(f.FileNameLower) && searchQuery.PassesFilters(f.FileNameLower, f.RelativePathLower) && !IsExcludedByPattern(f.FileNameLower)),
-                        f => new RankedFile(f, history.GetSelectionCount(f.FullPath), false, wildcardPattern.StartsWithFirstSegment(f.FileNameLower), IsCodeFile(f.FileName), f.FileNameLower.Length),
+                        files.Where(f => wildcardPattern.Matches(f.FileNameLower) && searchQuery.PassesFilters(f.FileNameLower, f.RelativePathLower) && !IsExcludedByPattern(f.FileNameLower, ignoredPatterns)),
+                        f =>
+                        {
+                            var score = GetSelectionCountCached(f.FullPath);
+                            return new RankedFile(f, score, false, wildcardPattern.StartsWithFirstSegment(f.FileNameLower), IsCodeFile(f.FileName), f.FileNameLower.Length);
+                        },
                         maxResults);
                 }
                 else
                 {
                     rankedFiles = SelectTopN(
-                        files.Where(f => wildcardPattern.Matches(f.FileNameLower) && !IsExcludedByPattern(f.FileNameLower)),
-                        f => new RankedFile(f, history.GetSelectionCount(f.FullPath), false, wildcardPattern.StartsWithFirstSegment(f.FileNameLower), IsCodeFile(f.FileName), f.FileNameLower.Length),
+                        files.Where(f => wildcardPattern.Matches(f.FileNameLower) && !IsExcludedByPattern(f.FileNameLower, ignoredPatterns)),
+                        f =>
+                        {
+                            var score = GetSelectionCountCached(f.FullPath);
+                            return new RankedFile(f, score, false, wildcardPattern.StartsWithFirstSegment(f.FileNameLower), IsCodeFile(f.FileName), f.FileNameLower.Length);
+                        },
                         maxResults);
                 }
             }
@@ -133,15 +163,23 @@ namespace InstaSearch.Services
                 if (searchQuery.HasFilters)
                 {
                     rankedFiles = SelectTopN(
-                        files.Where(f => f.FileNameLower.IndexOf(queryLower, StringComparison.Ordinal) >= 0 && searchQuery.PassesFilters(f.FileNameLower, f.RelativePathLower) && !IsExcludedByPattern(f.FileNameLower)),
-                        f => new RankedFile(f, history.GetSelectionCount(f.FullPath), IsExactFileNameMatch(f.FileNameLower, queryLower), f.FileNameLower.StartsWith(queryLower, StringComparison.Ordinal), IsCodeFile(f.FileName), f.FileNameLower.Length),
+                        files.Where(f => f.FileNameLower.IndexOf(queryLower, StringComparison.Ordinal) >= 0 && searchQuery.PassesFilters(f.FileNameLower, f.RelativePathLower) && !IsExcludedByPattern(f.FileNameLower, ignoredPatterns)),
+                        f =>
+                        {
+                            var score = GetSelectionCountCached(f.FullPath);
+                            return new RankedFile(f, score, IsExactFileNameMatch(f.FileNameLower, queryLower), f.FileNameLower.StartsWith(queryLower, StringComparison.Ordinal), IsCodeFile(f.FileName), f.FileNameLower.Length);
+                        },
                         maxResults);
                 }
                 else
                 {
                     rankedFiles = SelectTopN(
-                        files.Where(f => f.FileNameLower.IndexOf(queryLower, StringComparison.Ordinal) >= 0 && !IsExcludedByPattern(f.FileNameLower)),
-                        f => new RankedFile(f, history.GetSelectionCount(f.FullPath), IsExactFileNameMatch(f.FileNameLower, queryLower), f.FileNameLower.StartsWith(queryLower, StringComparison.Ordinal), IsCodeFile(f.FileName), f.FileNameLower.Length),
+                        files.Where(f => f.FileNameLower.IndexOf(queryLower, StringComparison.Ordinal) >= 0 && !IsExcludedByPattern(f.FileNameLower, ignoredPatterns)),
+                        f =>
+                        {
+                            var score = GetSelectionCountCached(f.FullPath);
+                            return new RankedFile(f, score, IsExactFileNameMatch(f.FileNameLower, queryLower), f.FileNameLower.StartsWith(queryLower, StringComparison.Ordinal), IsCodeFile(f.FileName), f.FileNameLower.Length);
+                        },
                         maxResults);
                 }
             }
@@ -154,7 +192,7 @@ namespace InstaSearch.Services
             var results = new List<SearchResult>(rankedFiles.Count);
             foreach (FileEntry f in rankedFiles)
             {
-                results.Add(new SearchResult(f, history.GetSelectionCount(f.FullPath), GetMoniker(imageService, f.FileName), queryLower));
+                results.Add(new SearchResult(f, GetSelectionCountCached(f.FullPath), GetMoniker(imageService, f.FileName), queryLower));
             }
 
             return results;
@@ -317,9 +355,8 @@ namespace InstaSearch.Services
         /// Checks if a file should be excluded based on user-configured ignored file patterns.
         /// Patterns support simple wildcards (e.g., *.designer.cs).
         /// </summary>
-        private bool IsExcludedByPattern(string fileNameLower)
+        private static bool IsExcludedByPattern(string fileNameLower, IReadOnlyList<string> patterns)
         {
-            IReadOnlyList<string> patterns = getIgnoredFilePatterns?.Invoke();
             if (patterns == null || patterns.Count == 0)
             {
                 return false;
